@@ -1,0 +1,27 @@
+{
+  "name": "likho",
+  "version": "0.0.2",
+  "description": "Very sweet CLI text editor",
+  "type": "module",
+  "bin": {
+    "likho": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "bun build src/index.ts --target=bun --packages external --outfile dist/index.js",
+    "prepack": "bun run build",
+    "start": "bun run src/index.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@opentui/core": "0.5.1",
+    "@opentui/keymap": "0.5.1"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.14",
+    "typescript": "5.9.3"
+  }
+}
