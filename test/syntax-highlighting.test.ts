@@ -26,7 +26,7 @@ test("syntax disposal destroys the client without scheduling a buffer-removal ti
     async resetBuffer() {},
   }) as unknown as TreeSitterClient
   const document: EditorDocument = {
-    initialText: "const value = 1",
+    persistedText: "const value = 1",
     snapshot: { path: "/tmp/example.ts", version: 1, dirty: false },
     markChanged() {},
     validateText() {},
@@ -47,7 +47,7 @@ test("syntax disposal destroys the client without scheduling a buffer-removal ti
     signal: new AbortController().signal,
     document,
     actions: {
-      captureText: () => ({ text: document.initialText, version: document.snapshot.version }),
+      captureText: () => ({ text: document.persistedText, version: document.snapshot.version }),
     },
     syntax: {
       bufferId: 7,
@@ -85,7 +85,7 @@ test("syntax captures once after a burst of document changes", async () => {
     },
   }) as unknown as TreeSitterClient
   const document: EditorDocument = {
-    initialText: text,
+    persistedText: text,
     get snapshot() {
       return { path: "/tmp/example.ts", version, dirty: version > 1 }
     },
@@ -151,7 +151,7 @@ test("syntax disables once when a document crosses the highlighting limit", asyn
     async resetBuffer() {},
   }) as unknown as TreeSitterClient
   const document: EditorDocument = {
-    initialText: text,
+    persistedText: text,
     get snapshot() {
       return { path: "/tmp/example.ts", version, dirty: version > 1 }
     },
@@ -228,7 +228,7 @@ test("syntax highlighting follows active-document filetype changes", async () =>
     }),
   ) as unknown as TreeSitterClient[]
   const document: EditorDocument = {
-    get initialText() {
+    get persistedText() {
       return text
     },
     get snapshot() {
@@ -301,7 +301,7 @@ test("syntax retains the full parse while painting only the viewport and oversca
     async resetBuffer() {},
   }) as unknown as TreeSitterClient
   const document: EditorDocument = {
-    initialText: text,
+    persistedText: text,
     snapshot: { path: "/tmp/example.ts", version: 1, dirty: false },
     markChanged() {},
     validateText() {},

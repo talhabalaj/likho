@@ -142,7 +142,7 @@ export async function runEditorSession(
     }
 
     const editor = new TextareaRenderable(renderer, {
-      initialValue: document.initialText,
+      initialValue: document.persistedText,
       width: "100%",
       height: "100%",
       wrapMode: "none",

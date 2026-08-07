@@ -15,7 +15,7 @@ test("formatting captures large supported documents only when commanded", async 
   let applied: Readonly<{ version: number; text: string }> | undefined
   const reports: string[] = []
   const document: EditorDocument = {
-    initialText: source,
+    persistedText: source,
     snapshot: { path: "/tmp/example.ts", version: 7, dirty: true },
     markChanged() {},
     validateText() {},

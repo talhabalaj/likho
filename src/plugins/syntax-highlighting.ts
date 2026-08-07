@@ -5,7 +5,7 @@ import {
   type HighlightResponse,
   type TreeSitterClient,
 } from "@opentui/core"
-import type { BuiltinPlugin, EditorPluginContext } from "./host"
+import type { BuiltinPlugin, CapturedDocumentRevision, EditorPluginContext } from "./host"
 
 // ponytail: OpenTUI content events lack edit deltas; raise this after switching resets to updateBuffer().
 export const MAX_HIGHLIGHT_BYTES = 200_000
@@ -62,7 +62,7 @@ export function createSyntaxHighlighting(
     id: "builtin.syntax-highlighting",
     activate(context) {
       if (context.signal.aborted) return
-      let submitted: Readonly<{ text: string; version: number }>
+      let submitted: CapturedDocumentRevision
       try {
         submitted = context.actions.captureText()
       } catch (error) {
@@ -132,11 +132,7 @@ export function createSyntaxHighlighting(
         clientPath = undefined
         await dependencies.destroyClient()
       }
-      const startClient = (
-        captured: Readonly<{ text: string; version: number }>,
-        path: string,
-        clearExisting = true,
-      ) => {
+      const startClient = (captured: CapturedDocumentRevision, path: string, clearExisting = true) => {
         const filetype = pathToFiletype(path)
         disabled = false
         if (clearExisting) clearHighlights()
@@ -185,7 +181,7 @@ export function createSyntaxHighlighting(
             ) {
               return
             }
-            let captured: Readonly<{ text: string; version: number }>
+            let captured: CapturedDocumentRevision
             try {
               captured = context.actions.captureText()
             } catch (error) {
@@ -239,7 +235,7 @@ export function createSyntaxHighlighting(
             if (timer) clearTimeout(timer)
             timer = setTimeout(() => {
               timer = undefined
-              let captured: Readonly<{ text: string; version: number }>
+              let captured: CapturedDocumentRevision
               try {
                 captured = context.actions.captureText()
               } catch (error) {

@@ -24,7 +24,7 @@ test("a new document becomes clean after saving its current text", () => {
   const path = join(dir, "note.txt")
   const document = openDocument(path)
 
-  expect(document.initialText).toBe("")
+  expect(document.persistedText).toBe("")
   expect(document.snapshot).toEqual({ path, version: 1, dirty: false })
 
   document.markChanged()

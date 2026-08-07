@@ -34,7 +34,7 @@ export interface EditorDocumentView {
 }
 
 export interface EditorDocument extends EditorDocumentView {
-  readonly initialText: string
+  readonly persistedText: string
   markChanged(): void
   validateText(text: string): void
   open(path: string, replaceText: (text: string) => void): void
@@ -124,7 +124,7 @@ export function openDocument(initialPath: string): EditorDocument {
   }
 
   return {
-    get initialText() {
+    get persistedText() {
       return savedText ?? ""
     },
     get snapshot() {
