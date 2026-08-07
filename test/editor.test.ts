@@ -11,6 +11,14 @@ test("builds an executable that launches with Bun", () => {
   expect(readFileSync(join(projectRoot, "dist/index.js"), "utf8").split("\n", 1)[0]).toBe("#!/usr/bin/env bun")
 })
 
+test("the executable reports invalid usage without entering the terminal UI", () => {
+  const projectRoot = join(import.meta.dir, "..")
+  const result = Bun.spawnSync(["bun", "run", "src/index.ts"], { cwd: projectRoot })
+
+  expect(result.exitCode).toBe(2)
+  expect(result.stderr.toString()).toBe("Usage: likho <file>\n")
+})
+
 test("maps Tree-sitter source columns to terminal display columns", () => {
   expect(
     toDisplayHighlights("\t漢 const", [

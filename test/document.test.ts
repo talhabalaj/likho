@@ -1,8 +1,18 @@
 import { afterEach, expect, test } from "bun:test"
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { openDocument } from "../src/document"
+import { MAX_FILE_BYTES, openDocument } from "../src/document"
 
 const dirs: string[] = []
 afterEach(() => dirs.splice(0).forEach((dir) => rmSync(dir, { recursive: true })))
@@ -42,13 +52,82 @@ test("document changes publish the new versioned snapshot", () => {
   const dir = mkdtempSync(join(tmpdir(), "editor-document-test-"))
   dirs.push(dir)
   const document = openDocument(join(dir, "note.txt"))
-  const versions: number[] = []
-  const subscription = document.onDidChange((snapshot) => versions.push(snapshot.version))
+  const snapshots: Array<{ version: number; dirty: boolean }> = []
+  const subscription = document.onDidChange(({ version, dirty }) => snapshots.push({ version, dirty }))
 
   document.replaceText("one")
   document.replaceText("one")
+  document.save()
   subscription.dispose()
   document.replaceText("two")
 
-  expect(versions).toEqual([2])
+  expect(snapshots).toEqual([
+    { version: 2, dirty: true },
+    { version: 2, dirty: false },
+  ])
+})
+
+test("one broken document listener does not block the others", () => {
+  const dir = mkdtempSync(join(tmpdir(), "editor-document-test-"))
+  dirs.push(dir)
+  const document = openDocument(join(dir, "note.txt"))
+  const errors: string[] = []
+  let delivered = false
+  document.onDidChange(
+    () => {
+      throw new Error("listener failed")
+    },
+    (error) => errors.push(error instanceof Error ? error.message : String(error)),
+  )
+  document.onDidChange(() => {
+    delivered = true
+  })
+
+  document.replaceText("changed")
+
+  expect(errors).toEqual(["listener failed"])
+  expect(delivered).toBe(true)
+})
+
+test("saving atomically replaces an existing file without changing its permissions", () => {
+  const dir = mkdtempSync(join(tmpdir(), "editor-document-test-"))
+  dirs.push(dir)
+  const path = join(dir, "note.txt")
+  writeFileSync(path, "original\n")
+  chmodSync(path, 0o640)
+  const previousInode = statSync(path).ino
+  const document = openDocument(path)
+
+  document.replaceText("replacement\n")
+  document.save()
+
+  expect(readFileSync(path, "utf8")).toBe("replacement\n")
+  expect(statSync(path).mode & 0o777).toBe(0o640)
+  expect(statSync(path).ino).not.toBe(previousInode)
+  expect(readdirSync(dir)).toEqual(["note.txt"])
+})
+
+test("saving through a symlink atomically replaces its target without replacing the link", () => {
+  const dir = mkdtempSync(join(tmpdir(), "editor-document-test-"))
+  dirs.push(dir)
+  const target = join(dir, "target.txt")
+  const path = join(dir, "note.txt")
+  writeFileSync(target, "original\n")
+  symlinkSync("target.txt", path)
+  const document = openDocument(path)
+
+  document.replaceText("replacement\n")
+  document.save()
+
+  expect(lstatSync(path).isSymbolicLink()).toBe(true)
+  expect(readFileSync(target, "utf8")).toBe("replacement\n")
+})
+
+test("opening an oversized file is rejected before loading it", () => {
+  const dir = mkdtempSync(join(tmpdir(), "editor-document-test-"))
+  dirs.push(dir)
+  const path = join(dir, "large.txt")
+  writeFileSync(path, Buffer.alloc(MAX_FILE_BYTES + 1, 120))
+
+  expect(() => openDocument(path)).toThrow(`Files over ${MAX_FILE_BYTES.toLocaleString()} bytes`)
 })

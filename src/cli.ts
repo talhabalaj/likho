@@ -1,9 +1,7 @@
 import { resolve } from "node:path"
-import { runEditorSession } from "./editor-session"
+import { runEditorSession, type EditorSessionResult } from "./editor-session"
 
 export type CliSignal = "SIGHUP" | "SIGINT" | "SIGTERM"
-
-export type EditorSessionResult = { kind: "closed" } | { kind: "signal"; signal: CliSignal }
 
 export type CliResult = Readonly<{
   exitCode: 0 | 1 | 2 | 129 | 130 | 143
@@ -19,6 +17,13 @@ const SIGNAL_EXIT_CODES: Record<CliSignal, 129 | 130 | 143> = {
   SIGTERM: 143,
 }
 
+function abortedSignal(reason: unknown): CliSignal | undefined {
+  if (typeof reason !== "object" || reason === null || !("signal" in reason)) return undefined
+  return reason.signal === "SIGHUP" || reason.signal === "SIGINT" || reason.signal === "SIGTERM"
+    ? reason.signal
+    : undefined
+}
+
 export async function runCli(
   argv: readonly string[],
   options: Readonly<{ signal: AbortSignal; editFile?: EditFile }>,
@@ -29,7 +34,9 @@ export async function runCli(
 
   try {
     const result = await (options.editFile ?? runEditorSession)({ filePath: resolve(argv[0]), signal: options.signal })
-    return { exitCode: result.kind === "closed" ? 0 : SIGNAL_EXIT_CODES[result.signal] }
+    if (result.kind === "closed") return { exitCode: 0 }
+    const signal = abortedSignal(result.reason)
+    return signal ? { exitCode: SIGNAL_EXIT_CODES[signal] } : { exitCode: 1, stderr: "Editor cancelled\n" }
   } catch (error) {
     return {
       exitCode: 1,

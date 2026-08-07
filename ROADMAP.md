@@ -65,7 +65,8 @@ Language tooling should arrive through standard protocols and remain optional.
 - [ ] Diagnostics and jump-to-diagnostic navigation
 - [ ] Go to definition, references, hover, and document symbols
 - [ ] Completion with predictable keyboard ownership
-- [ ] Document and selection formatting
+- [x] Document formatting with Prettier
+- [ ] Selection formatting
 - [ ] Syntax-tree-aware selection and structural navigation where available
 - [ ] Keep startup independent of language servers and degrade cleanly when they fail
 

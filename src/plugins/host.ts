@@ -54,6 +54,7 @@ export interface EditorActions {
   copy(): void
   cut(): void
   insertTab(): void
+  applyText(expectedVersion: number, text: string): boolean
   requestClose(): void
 }
 
@@ -65,6 +66,7 @@ export interface SyntaxTarget {
 }
 
 export interface EditorPluginContext {
+  readonly signal: AbortSignal
   readonly document: EditorDocument
   readonly commands: CommandContributions
   readonly actions: EditorActions
@@ -81,7 +83,13 @@ export class PluginHost<TContext extends object> implements Disposable {
     private readonly onFailure: (failure: PluginFailure) => void = () => {},
   ) {}
 
-  async activate(plugins: readonly BuiltinPlugin<TContext>[]): Promise<void> {
+  private report(failure: PluginFailure): void {
+    try {
+      this.onFailure(failure)
+    } catch {}
+  }
+
+  async activate(plugins: readonly BuiltinPlugin<TContext>[], signal?: AbortSignal): Promise<void> {
     if (this.disposed) throw new Error("Plugin host is disposed")
 
     const ids = new Set(this.active.map(({ plugin }) => plugin.id))
@@ -91,15 +99,26 @@ export class PluginHost<TContext extends object> implements Disposable {
     }
 
     for (const plugin of plugins) {
+      if (signal?.aborted) break
       const subscriptions = new DisposableStore()
       try {
         await plugin.activate({ ...this.context, subscriptions })
+        if (signal?.aborted) {
+          try {
+            await subscriptions.dispose()
+          } catch (disposeError) {
+            this.report({ pluginId: plugin.id, phase: "dispose", error: disposeError })
+          }
+          break
+        }
         this.active.push({ plugin, subscriptions })
       } catch (error) {
         try {
           await subscriptions.dispose()
-        } catch {}
-        this.onFailure({ pluginId: plugin.id, phase: "activate", error })
+        } catch (disposeError) {
+          this.report({ pluginId: plugin.id, phase: "dispose", error: disposeError })
+        }
+        this.report({ pluginId: plugin.id, phase: "activate", error })
       }
     }
   }
@@ -111,7 +130,7 @@ export class PluginHost<TContext extends object> implements Disposable {
       try {
         await subscriptions.dispose()
       } catch (error) {
-        this.onFailure({ pluginId: plugin.id, phase: "dispose", error })
+        this.report({ pluginId: plugin.id, phase: "dispose", error })
       }
     }
     this.active = []

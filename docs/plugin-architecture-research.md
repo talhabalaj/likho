@@ -1,19 +1,19 @@
 # Plugin architecture research
 
-Research date: 2026-08-08. Sources are limited to official documentation, repositories, and package metadata. The design is for the current Bun/TypeScript/OpenTUI editor in `src/index.ts`; no application code was changed.
+Research date: 2026-08-08. Sources are limited to official documentation, repositories, and package metadata. This document records the design baseline; the selected architecture has since been implemented in the application.
 
 ## Recommendation
 
 Use a **trusted, in-process built-in plugin host** with one plugin entry point, a host-owned lifecycle, namespaced commands, and narrow editor capabilities. Implement its command/keybinding and UI seams with the OpenTUI modules that already exist:
 
 - [`@opentui/core@0.5.1` plugin slots](https://opentui.com/docs/plugins/slots/) for named UI regions and lifecycle-aware renderable contributions. This version is already installed.
-- [`@opentui/keymap@0.5.1`](https://opentui.com/docs/keymap/overview/) for commands, platform-aware bindings, focus/context layers, precedence, chords, discovery, and cleanup. It is the matching official OpenTUI package, but is not installed in this repository yet.
+- [`@opentui/keymap@0.5.1`](https://opentui.com/docs/keymap/overview/) for commands, platform-aware bindings, focus/context layers, precedence, chords, discovery, and cleanup. It is the matching official OpenTUI package used by the implementation.
 
 Do not build an extension marketplace, manifest resolver, dependency injection container, child-process host, or WASM runtime now. Built-ins are compiled with the application and trusted. Add external plugins only after the in-process interface has survived several real built-ins; external code requires a separate security and compatibility design, not merely `import()`.
 
 Keep a small kernel. The edit buffer, safe load/save rules, dirty-state truth, render loop, plugin host, and shutdown are invariants, not optional plugins. Commands such as Save and Close can be contributed by built-ins, but their handlers must call the kernel's safe document operations rather than reimplement file writes.
 
-## What exists in the current editor
+## Baseline before implementation
 
 The current `src/index.ts` is a useful prototype but one closure owns almost everything:
 
@@ -190,6 +190,8 @@ Do not expose `CliRenderer`, `TextareaRenderable`, mutable application state, No
 6. UI slots have host-defined types and ordering. Structural slots such as `editor-frame` use `single_winner`; additive status/panel slots use deterministic order.
 7. Core OpenTUI slot render callbacks remain synchronous. Expensive work runs asynchronously, is cancellable, and applies results only if the document version still matches.
 
+Built-ins are trusted in-process code, so cancellation is cooperative: an asynchronous `activate` implementation must observe `context.signal` and settle before the host rolls back its resources. The host does not dispose a subscription store underneath activation that is still running. Long initialization such as Tree-sitter buffer creation instead starts as plugin-owned background work; its disposer joins initialization, removes any created buffer, and then destroys the client.
+
 ### Startup and shutdown order
 
 1. Parse arguments and load the document through the safe document module.
@@ -301,13 +303,14 @@ type CliResult = Readonly<{
   stderr?: string
 }>
 
+type EditorSessionResult =
+  | { kind: "closed" }
+  | { kind: "aborted"; reason: unknown }
+
 type EditFile = (request: Readonly<{
   filePath: string
   signal: AbortSignal
-}>) => Promise<
-  | { kind: "closed" }
-  | { kind: "signal"; signal: CliSignal }
->
+}>) => Promise<EditorSessionResult>
 
 export function runCli(
   argv: readonly string[],
@@ -317,15 +320,12 @@ export function runCli(
 export function runEditorSession(request: Readonly<{
   filePath: string
   signal: AbortSignal
-}>): Promise<
-  | { kind: "closed" }
-  | { kind: "signal"; signal: CliSignal }
->
+}>): Promise<EditorSessionResult>
 ```
 
 `runCli` is the CLI Seam. It hides argument parsing, path resolution, session invocation, error normalization, and exit-code mapping. Its optional `editFile` function is the whole test Seam; production uses `runEditorSession`, while CLI tests use one fake function.
 
-`runEditorSession` is the editing-lifetime Seam. Its implementation owns the monotonic state machine `new -> starting -> running -> closing -> closed`, the document, OpenTUI objects, plugin host, close confirmation, subscriptions, and one completion promise. It does not return a public session with `start`, `stop`, `mount`, or renderer getters because those would push ordering knowledge into callers.
+`runEditorSession` is the editing-lifetime Seam. Its implementation owns the monotonic state machine `new -> starting -> running -> closing -> closed`, the document, OpenTUI objects, plugin host, close confirmation, subscriptions, and one completion promise. It reports an opaque abort reason; only `runCli` recognizes process-signal reasons and maps them to exit policy. It does not return a public session with `start`, `stop`, `mount`, or renderer getters because those would push ordering knowledge into callers.
 
 The renderer factory is an internal Seam: production uses `createCliRenderer`, session tests use OpenTUI's existing `createTestRenderer`. Do not invent a renderer Interface around OpenTUI. Both Adapters already return `CliRenderer`.
 
@@ -403,7 +403,7 @@ src/
     edit-commands.ts               Copy, Cut, Tab and editor actions
     vscode-keymap.ts               platform-aware VS Code bindings
     syntax-highlighting.ts         Tree-sitter and decoration ownership
-    formatting.ts                  formatter command/provider when implemented
+    formatting.ts                  Prettier formatting command and stale-edit guard
     chrome.ts                      title/status and structural UI slots
 ```
 

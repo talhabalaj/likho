@@ -56,8 +56,17 @@ test("session startup failures become one-line CLI errors", async () => {
 test("graceful signal shutdown uses the conventional exit code", async () => {
   const result = await runCli(["note.txt"], {
     signal: new AbortController().signal,
-    editFile: async () => ({ kind: "signal", signal: "SIGTERM" }),
+    editFile: async () => ({ kind: "aborted", reason: { kind: "signal", signal: "SIGTERM" } }),
   })
 
   expect(result).toEqual({ exitCode: 143 })
+})
+
+test("non-process cancellation is not mislabeled as SIGTERM", async () => {
+  const result = await runCli(["note.txt"], {
+    signal: new AbortController().signal,
+    editFile: async () => ({ kind: "aborted", reason: undefined }),
+  })
+
+  expect(result).toEqual({ exitCode: 1, stderr: "Editor cancelled\n" })
 })

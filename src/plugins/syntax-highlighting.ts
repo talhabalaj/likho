@@ -41,62 +41,100 @@ function highlightPriority(group: string): number {
   return Math.min(255, 20 + group.split(".").length)
 }
 
-export const syntaxHighlighting: BuiltinPlugin<EditorPluginContext> = {
-  id: "builtin.syntax-highlighting",
-  async activate(context) {
-    const initial = context.document.snapshot
-    const filetype = pathToFiletype(initial.path)
-    if (!filetype || Buffer.byteLength(initial.text) > MAX_HIGHLIGHT_BYTES) return
-
-    const client: TreeSitterClient = getTreeSitterClient()
-    let bufferCreated = false
-    let disposed = false
-    let timer: ReturnType<typeof setTimeout> | undefined
-
-    const onHighlights = (bufferId: number, version: number, responses: HighlightResponse[]) => {
-      const current = context.document.snapshot
-      if (disposed || bufferId !== context.syntax.bufferId || version !== current.version) return
-      context.syntax.clear()
-      for (const highlight of toDisplayHighlights(current.text, responses)) {
-        const styleId = context.syntax.resolveStyleId(highlight.group)
-        if (styleId === null || highlight.start === highlight.end) continue
-        context.syntax.add({ ...highlight, styleId, priority: highlightPriority(highlight.group) })
-      }
-    }
-
-    client.on("highlights:response", onHighlights)
-    context.subscriptions.add(async () => {
-      disposed = true
-      if (timer) clearTimeout(timer)
-      client.off("highlights:response", onHighlights)
-      if (bufferCreated) await client.removeBuffer(context.syntax.bufferId)
-      await destroyTreeSitterClient()
-    })
-
-    bufferCreated = await client.createBuffer(
-      context.syntax.bufferId,
-      initial.text,
-      filetype === "json" ? "javascript" : filetype,
-      initial.version,
-    )
-    if (!bufferCreated) throw new Error("Syntax highlighting unavailable")
-
-    context.subscriptions.add(
-      context.document.onDidChange((snapshot) => {
-        if (timer) clearTimeout(timer)
-        if (Buffer.byteLength(snapshot.text) > MAX_HIGHLIGHT_BYTES) {
-          context.syntax.clear()
-          return
-        }
-        timer = setTimeout(() => {
-          timer = undefined
-          void client.resetBuffer(context.syntax.bufferId, snapshot.version, snapshot.text).catch(() => {
-            if (disposed) return
-            context.syntax.clear()
-            context.report("Syntax highlighting unavailable")
-          })
-        }, HIGHLIGHT_DEBOUNCE_MS)
-      }),
-    )
-  },
+export interface SyntaxHighlightingDependencies {
+  getClient(): TreeSitterClient
+  destroyClient(): Promise<void>
 }
+
+export function createSyntaxHighlighting(
+  dependencies: SyntaxHighlightingDependencies = {
+    getClient: getTreeSitterClient,
+    destroyClient: destroyTreeSitterClient,
+  },
+): BuiltinPlugin<EditorPluginContext> {
+  return {
+    id: "builtin.syntax-highlighting",
+    activate(context) {
+      if (context.signal.aborted) return
+      const initial = context.document.snapshot
+      const filetype = pathToFiletype(initial.path)
+      if (!filetype || Buffer.byteLength(initial.text) > MAX_HIGHLIGHT_BYTES) return
+
+      const client = dependencies.getClient()
+      let disposed = false
+      let timer: ReturnType<typeof setTimeout> | undefined
+
+      const onHighlights = (bufferId: number, version: number, responses: HighlightResponse[]) => {
+        const current = context.document.snapshot
+        if (disposed || bufferId !== context.syntax.bufferId || version !== current.version) return
+        context.syntax.clear()
+        for (const highlight of toDisplayHighlights(current.text, responses)) {
+          const styleId = context.syntax.resolveStyleId(highlight.group)
+          if (styleId === null || highlight.start === highlight.end) continue
+          context.syntax.add({ ...highlight, styleId, priority: highlightPriority(highlight.group) })
+        }
+      }
+
+      client.on("highlights:response", onHighlights)
+      let initialization!: Promise<boolean>
+      context.subscriptions.add(async () => {
+        disposed = true
+        if (timer) clearTimeout(timer)
+        client.off("highlights:response", onHighlights)
+        const created = await initialization
+        if (created) await client.removeBuffer(context.syntax.bufferId)
+        await dependencies.destroyClient()
+      })
+
+      initialization = client
+        .createBuffer(
+          context.syntax.bufferId,
+          initial.text,
+          filetype === "json" ? "javascript" : filetype,
+          initial.version,
+        )
+        .then(
+          (created) => {
+            if (!created && !disposed && !context.signal.aborted) context.report("Syntax highlighting unavailable")
+            return created
+          },
+          (error) => {
+            if (!disposed && !context.signal.aborted) {
+              context.report(`Syntax highlighting failed: ${error instanceof Error ? error.message : String(error)}`)
+            }
+            return false
+          },
+        )
+
+      let scheduledVersion = initial.version
+      context.subscriptions.add(
+        context.document.onDidChange(
+          (snapshot) => {
+            if (snapshot.version === scheduledVersion) return
+            scheduledVersion = snapshot.version
+            if (timer) clearTimeout(timer)
+            if (Buffer.byteLength(snapshot.text) > MAX_HIGHLIGHT_BYTES) {
+              context.syntax.clear()
+              return
+            }
+            timer = setTimeout(() => {
+              timer = undefined
+              void initialization.then((created) => {
+                if (!created || disposed || context.signal.aborted) return
+                void client.resetBuffer(context.syntax.bufferId, snapshot.version, snapshot.text).catch(() => {
+                  if (disposed || context.signal.aborted) return
+                  context.syntax.clear()
+                  context.report("Syntax highlighting unavailable")
+                })
+              })
+            }, HIGHLIGHT_DEBOUNCE_MS)
+          },
+          (error) =>
+            context.report(`Syntax highlighting failed: ${error instanceof Error ? error.message : String(error)}`),
+        ),
+      )
+    },
+  }
+}
+
+export const syntaxHighlighting = createSyntaxHighlighting()

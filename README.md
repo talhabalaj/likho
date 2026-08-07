@@ -35,6 +35,7 @@ Passing a path that does not exist opens an empty buffer and creates the file wh
 - Single-file editing in a full-screen terminal UI
 - Line-number gutter, mouse-wheel scrolling, selection, undo, and redo
 - Tree-sitter syntax highlighting selected from the file extension
+- Prettier formatting selected from the file extension
 - Unicode-aware highlight columns and visible tab characters
 - Dirty-state, cursor-position, encoding, and shortcut indicators
 - OSC 52 clipboard copy and cut when supported by the terminal
@@ -57,6 +58,7 @@ Passing a path that does not exist opens an empty buffer and creates the file wh
 | Undo | `Mod+Z` |
 | Redo | `Mod+Shift+Z`; `Ctrl+Y` also works outside macOS |
 | Delete line | `Mod+Shift+K` |
+| Format document | `Shift+Option+F` on macOS, `Shift+Alt+F` elsewhere |
 | Start/end of visual line | `Home` / `End` |
 | Select to start/end of visual line | `Shift+Home` / `Shift+End` |
 | Start/end of document | `Command+Up/Down` on macOS, `Ctrl+Home/End` elsewhere |
@@ -70,6 +72,7 @@ If the document is dirty, the first close warns you and the second close discard
 - One file is open per process. There are no tabs, splits, explorer, project model, or settings UI yet.
 - Files larger than 900,000 bytes are rejected while OpenTUI's buffer export is limited.
 - Syntax highlighting is disabled above 200,000 bytes until edits can be sent incrementally.
+- Formatting is disabled above 200,000 bytes to keep the input loop responsive.
 - Clipboard support depends on the terminal accepting OSC 52.
 - The plugin host currently organizes trusted built-ins. It does not load third-party code.
 
@@ -105,15 +108,15 @@ src/index.ts                  process signals and exit status
 src/cli.ts                    argument validation and CLI results
 src/document.ts               document state and safe-save rules
 src/editor-session.ts         OpenTUI session and capability adapters
-src/plugins/                  built-in commands, keymap, highlighting, and host
+src/plugins/                  built-in commands, chrome, gutter, formatting, highlighting, and host
 test/                         document, CLI, session, packaging, and lifecycle tests
 docs/                         design and technology research
 ```
 
 The editor core owns document safety and terminal lifecycle. Built-ins receive narrow capabilities
-for commands, keybindings, syntax decorations, and status messages; they do not receive the entire
-renderer or filesystem. This keeps today's implementation small while preserving a credible seam for
-future isolation.
+for commands, keybindings, syntax decorations, and status messages; OpenTUI-only UI built-ins are
+composed with explicit render dependencies. No built-in receives filesystem access through the host.
+This keeps today's implementation small while preserving a credible seam for future isolation.
 
 ## Status
 

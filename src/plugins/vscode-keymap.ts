@@ -15,6 +15,7 @@ export const vscodeKeymap: BuiltinPlugin<EditorPluginContext> = {
       { key: "mod+s", command: "file.save" },
       { key: "mod+c", command: "editor.copy" },
       { key: "mod+x", command: "editor.cut" },
+      { key: "shift+meta+f", command: "editor.formatDocument" },
       { key: "mod+w", command: "window.close" },
       { key: "ctrl+q", command: "window.close" },
       { key: "tab", command: "editor.insertTab" },
