@@ -1,4 +1,4 @@
-import type { EditorDocument } from "../document"
+import type { EditorDocumentView } from "../document"
 
 export interface Disposable {
   dispose(): void | Promise<void>
@@ -59,7 +59,7 @@ export interface CommandContributions {
 }
 
 export interface EditorActions {
-  captureText(): Readonly<{ text: string; version: number }>
+  captureText(): CapturedDocumentRevision
   save(): void
   copy(): void
   cut(): void
@@ -68,6 +68,11 @@ export interface EditorActions {
   cancelOpenFileRequest(): void
   requestOpenFile(path: string): boolean
   requestClose(): void
+}
+
+export interface CapturedDocumentRevision {
+  readonly text: string
+  readonly version: number
 }
 
 export interface SyntaxTarget {
@@ -83,7 +88,7 @@ export interface SyntaxTarget {
 
 export interface EditorPluginContext {
   readonly signal: AbortSignal
-  readonly document: EditorDocument
+  readonly document: EditorDocumentView
   readonly commands: CommandContributions
   readonly actions: EditorActions
   readonly syntax: SyntaxTarget

@@ -8,7 +8,6 @@ export interface MatchRange {
 
 export interface FuzzyMatch<T> {
   readonly item: T
-  readonly rank: number
   readonly matches: readonly MatchRange[]
 }
 
@@ -23,17 +22,15 @@ export function createFuzzyMatcher<T extends object>(
   const fuse = new Fuse(items, {
     keys: keys.map(({ name, weight }) => ({ name, weight })) as FuseOptionKey<T>[],
     includeMatches: true,
-    includeScore: true,
     ignoreLocation: true,
     threshold: 0.4,
   })
 
   return {
     search(query, limit = 100) {
-      if (!query) return items.slice(0, limit).map((item) => ({ item, rank: 0, matches: [] }))
+      if (!query) return items.slice(0, limit).map((item) => ({ item, matches: [] }))
       return fuse.search(query, { limit }).map((result) => ({
         item: result.item,
-        rank: result.score ?? 1,
         matches: (result.matches ?? []).flatMap((match) =>
           match.key
             ? match.indices.map(([start, inclusiveEnd]) => ({

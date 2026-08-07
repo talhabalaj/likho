@@ -23,8 +23,6 @@ test("fuzzy matching prefers a basename hit and exposes half-open highlight rang
 
   expect(results.map(({ item }) => item.id)).toEqual(["base", "path"])
   expect(results[0]?.matches).toContainEqual({ field: "baseName", start: 0, end: 5 })
-  expect(results[0]?.rank).toBeGreaterThanOrEqual(0)
-  expect(results[0]?.rank).toBeLessThanOrEqual(1)
 })
 
 test("fuzzy matching preserves Unicode labels and enforces the result limit", () => {

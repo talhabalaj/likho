@@ -1,5 +1,6 @@
 import {
   BoxRenderable,
+  CliRenderEvents,
   InputRenderable,
   StyledText,
   TextRenderable,
@@ -14,6 +15,13 @@ import { discoverWorkspaceFiles, type WorkspaceFile } from "../workspace-files"
 import type { BuiltinPlugin, CommandContributions, EditorPluginContext } from "./host"
 
 const VISIBLE_RESULTS = 10
+const PANEL_CHROME_HEIGHT = 6
+
+function panelLayout(terminalHeight: number): Readonly<{ top: number; height: number; visibleRows: number }> {
+  const top = terminalHeight >= 8 ? 1 : 0
+  const height = Math.min(VISIBLE_RESULTS + PANEL_CHROME_HEIGHT, Math.max(0, terminalHeight - top))
+  return { top, height, visibleRows: Math.max(0, height - PANEL_CHROME_HEIGHT) }
+}
 
 export interface QuickInputPluginDependencies {
   readonly renderer: CliRenderer
@@ -142,6 +150,11 @@ export function createQuickInput({
       let syncingInput = false
       let disposing = false
       let visibleIndices = Array.from<number | undefined>({ length: VISIBLE_RESULTS })
+      let layout = panelLayout(renderer.height)
+      const scrollResults = (direction: "up" | "down" | "left" | "right" | undefined) => {
+        if (direction === "up") quickInput.move(-3)
+        if (direction === "down") quickInput.move(3)
+      }
 
       const overlay = new BoxRenderable(renderer, {
         position: "absolute",
@@ -157,16 +170,15 @@ export function createQuickInput({
         },
         onMouseScroll(event) {
           event.stopPropagation()
-          if (event.scroll?.direction === "up") quickInput.move(-3)
-          if (event.scroll?.direction === "down") quickInput.move(3)
+          scrollResults(event.scroll?.direction)
         },
       })
       const panel = new BoxRenderable(renderer, {
         position: "absolute",
-        top: 1,
+        top: layout.top,
         left: "15%",
         width: "70%",
-        height: 16,
+        height: layout.height,
         zIndex: 101,
         flexDirection: "column",
         backgroundColor: "#252526",
@@ -178,8 +190,7 @@ export function createQuickInput({
         },
         onMouseScroll(event) {
           event.stopPropagation()
-          if (event.scroll?.direction === "up") quickInput.move(-3)
-          if (event.scroll?.direction === "down") quickInput.move(3)
+          scrollResults(event.scroll?.direction)
         },
       })
       const input = new InputRenderable(renderer, {
@@ -195,26 +206,6 @@ export function createQuickInput({
         cursorColor: "#ffffff",
         onContentChange: () => {
           if (!syncingInput) void quickInput.setValue(input.value)
-        },
-        onSubmit: () => {
-          void quickInput.accept()
-        },
-        onKeyDown: (key) => {
-          const movements: Readonly<Record<string, number>> = {
-            up: -1,
-            down: 1,
-            pageup: -VISIBLE_RESULTS,
-            pagedown: VISIBLE_RESULTS,
-          }
-          if (key.name === "escape") {
-            key.preventDefault()
-            key.stopPropagation()
-            quickInput.close()
-          } else if (key.name in movements) {
-            key.preventDefault()
-            key.stopPropagation()
-            quickInput.move(movements[key.name]!)
-          }
         },
       })
       const rows = Array.from({ length: VISIBLE_RESULTS }, (_, rowIndex) => {
@@ -255,7 +246,6 @@ export function createQuickInput({
       root.add(overlay)
 
       const render = (snapshot: QuickInputSnapshot) => {
-        context.actions.cancelOpenFileRequest()
         overlay.visible = snapshot.open
         if (!snapshot.open) {
           if (!disposing) editor.focus()
@@ -265,8 +255,10 @@ export function createQuickInput({
         if (input.value !== snapshot.value) input.value = snapshot.value
         input.placeholder = snapshot.mode === "commands" ? "Type a command" : "Search files by name"
         syncingInput = false
-        const start = Math.max(0, Math.min(snapshot.selectedIndex, snapshot.items.length - VISIBLE_RESULTS))
+        const pageSize = Math.max(1, layout.visibleRows)
+        const start = Math.max(0, Math.min(snapshot.selectedIndex, snapshot.items.length - pageSize))
         visibleIndices = visibleIndices.map((_, index) => {
+          if (index >= layout.visibleRows) return undefined
           const itemIndex = start + index
           return itemIndex < snapshot.items.length ? itemIndex : undefined
         })
@@ -287,7 +279,22 @@ export function createQuickInput({
         input.focus()
       }
 
-      context.subscriptions.add(quickInput.onDidChange(render))
+      context.subscriptions.add(
+        quickInput.onDidChange((snapshot) => {
+          context.actions.cancelOpenFileRequest()
+          render(snapshot)
+        }),
+      )
+      const onResize = () => {
+        layout = panelLayout(renderer.height)
+        panel.top = layout.top
+        panel.height = layout.height
+        render(quickInput.snapshot)
+      }
+      renderer.on(CliRenderEvents.RESIZE, onResize)
+      context.subscriptions.add(() => {
+        renderer.off(CliRenderEvents.RESIZE, onResize)
+      })
       const open = (mode: "files" | "commands") => {
         void quickInput.open(mode)
       }
@@ -314,8 +321,8 @@ export function createQuickInput({
         { id: "quickInput.close", run: () => quickInput.close() },
         { id: "quickInput.previous", run: () => quickInput.move(-1) },
         { id: "quickInput.next", run: () => quickInput.move(1) },
-        { id: "quickInput.previousPage", run: () => quickInput.move(-VISIBLE_RESULTS) },
-        { id: "quickInput.nextPage", run: () => quickInput.move(VISIBLE_RESULTS) },
+        { id: "quickInput.previousPage", run: () => quickInput.move(-Math.max(1, layout.visibleRows)) },
+        { id: "quickInput.nextPage", run: () => quickInput.move(Math.max(1, layout.visibleRows)) },
         {
           id: "quickInput.accept",
           run: () => {

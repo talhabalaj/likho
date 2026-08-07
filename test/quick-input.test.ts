@@ -32,6 +32,28 @@ test("Quick Open switches to commands only for a leading greater-than sign", asy
   expect(quickInput.snapshot.items.map(({ id }) => id)).toEqual(["file"])
 })
 
+test("query changes preserve the selected result by stable ID", async () => {
+  const files: QuickInputProvider = {
+    prepare() {},
+    search(query) {
+      const items = [
+        { id: "alpha", label: "alpha.ts", accept: () => true },
+        { id: "beta", label: "beta.ts", accept: () => true },
+        { id: "gamma", label: "gamma.ts", accept: () => true },
+      ]
+      return query === "b" ? [items[1]!, items[0]!] : items
+    },
+  }
+  const quickInput = new QuickInput({ files, commands: provider({ id: "command", label: "Save", accept: () => true }) })
+
+  await quickInput.open("files")
+  quickInput.select(1)
+  await quickInput.setValue("b")
+
+  expect(quickInput.snapshot.items.map(({ id }) => id)).toEqual(["beta", "alpha"])
+  expect(quickInput.snapshot.items[quickInput.snapshot.selectedIndex]?.id).toBe("beta")
+})
+
 test("command acceptance closes before dispatch while rejected file acceptance stays open", async () => {
   let commandSawOpen = true
   const quickInput = new QuickInput({

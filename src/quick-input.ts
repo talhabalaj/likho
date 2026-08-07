@@ -73,6 +73,7 @@ export class QuickInput {
   async setValue(value: string): Promise<void> {
     if (!this.state.open || !this.controller) return
     const mode: QuickInputMode = value.startsWith(">") ? "commands" : "files"
+    const selectedId = mode === this.state.mode ? this.state.items[this.state.selectedIndex]?.id : undefined
     this.state = {
       ...this.state,
       mode,
@@ -82,7 +83,7 @@ export class QuickInput {
       items: this.prepared.has(mode) ? this.state.items : [],
       selectedIndex: 0,
     }
-    if (this.prepared.has(mode)) this.refresh()
+    if (this.prepared.has(mode)) this.refresh(selectedId)
     else this.emit()
     await this.prepare(mode, this.generation, this.controller.signal)
   }
@@ -159,9 +160,9 @@ export class QuickInput {
     }
   }
 
-  private refresh(): void {
+  private refresh(preferredSelectionId?: string): void {
     const query = this.state.mode === "commands" ? this.state.value.slice(1).trimStart() : this.state.value
-    const selectedId = this.state.items[this.state.selectedIndex]?.id
+    const selectedId = preferredSelectionId ?? this.state.items[this.state.selectedIndex]?.id
     const items = this.providers[this.state.mode].search(query).slice(0, 100)
     const preservedIndex = selectedId ? items.findIndex(({ id }) => id === selectedId) : -1
     this.state = {

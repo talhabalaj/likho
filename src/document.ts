@@ -25,17 +25,20 @@ export interface DocumentSnapshot {
   readonly dirty: boolean
 }
 
-export interface EditorDocument {
-  readonly initialText: string
+export interface EditorDocumentView {
   readonly snapshot: DocumentSnapshot
-  markChanged(): void
-  validateText(text: string): void
-  open(path: string, replaceText: (text: string) => void): void
-  save(text: string): void
   onDidChange(
     listener: (snapshot: DocumentSnapshot) => void,
     onError?: (error: unknown) => void,
   ): { dispose(): void }
+}
+
+export interface EditorDocument extends EditorDocumentView {
+  readonly initialText: string
+  markChanged(): void
+  validateText(text: string): void
+  open(path: string, replaceText: (text: string) => void): void
+  save(text: string): void
 }
 
 function countLines(text: string): number {
@@ -139,7 +142,8 @@ export function openDocument(initialPath: string): EditorDocument {
       if (nextPath === path) return
       const nextStoragePath = existsSync(nextPath) ? realpathSync(nextPath) : nextPath
       const nextSavedText = readDocument(nextStoragePath)
-      replaceText(nextSavedText ?? "")
+      if (nextSavedText === null) throw new Error(`File not found: ${nextPath}`)
+      replaceText(nextSavedText)
       path = nextPath
       storagePath = nextStoragePath
       savedText = nextSavedText
