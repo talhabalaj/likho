@@ -45,21 +45,37 @@ export interface PluginFailure {
 
 export interface CommandContributions {
   readonly platform: "macos" | "windows" | "linux" | "unknown"
-  registerCommand(command: Readonly<{ id: string; title: string; run(): void | Promise<void> }>): Disposable
-  registerBindings(bindings: readonly Readonly<{ key: string; command: string }>[]): Disposable
+  registerCommand(
+    command: Readonly<{ id: string; title: string; palette?: boolean; run(): void | Promise<void> }>,
+  ): Disposable
+  registerBindings(
+    bindings: readonly Readonly<{ key: string; command: string }>[],
+    options?: Readonly<{
+      scope?: "editor" | "global" | Readonly<{ target: object; mode?: "focus" | "focus-within"; priority?: number }>
+    }>,
+  ): Disposable
+  listCommands(): readonly Readonly<{ id: string; title: string; keybinding?: string }>[]
+  executeCommand(id: string): boolean
 }
 
 export interface EditorActions {
+  captureText(): Readonly<{ text: string; version: number }>
   save(): void
   copy(): void
   cut(): void
   insertTab(): void
   applyText(expectedVersion: number, text: string): boolean
+  cancelOpenFileRequest(): void
+  requestOpenFile(path: string): boolean
   requestClose(): void
 }
 
 export interface SyntaxTarget {
   readonly bufferId: number
+  getVisibleLineRange(): Readonly<{ start: number; end: number }>
+  onVisibleLineRangeChange(
+    listener: (range: Readonly<{ start: number; end: number }>) => void,
+  ): Disposable
   clear(): void
   add(decoration: Readonly<{ line: number; start: number; end: number; styleId: number; priority: number }>): void
   resolveStyleId(group: string): number | null

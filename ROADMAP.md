@@ -29,7 +29,7 @@ The next release line should make installing and trusting Likho boring.
 - [ ] Automate npm and binary releases from version tags
 - [ ] Add an explicit open-source license
 - [ ] Add a short terminal demo and issue templates
-- [ ] Make saves atomic while retaining external-change detection
+- [x] Make saves atomic while retaining external-change detection
 - [ ] Add recovery coverage for interrupted writes and cleanup failures
 - [ ] Record startup, memory, and large-buffer baselines to catch regressions
 
@@ -38,7 +38,8 @@ The next release line should make installing and trusting Likho boring.
 This milestone should remove the reasons a user has to leave the editor for routine text work.
 
 - [ ] Find, next/previous match, and replace
-- [ ] Go to line and a searchable command palette
+- [ ] Go to line
+- [x] Searchable command palette with shared Quick Open `>` mode
 - [ ] Indent/outdent selections and configure tab width
 - [ ] Improve word, paragraph, and selection navigation
 - [ ] Preserve and expose line-ending and final-newline choices
@@ -51,7 +52,8 @@ This milestone should remove the reasons a user has to leave the editor for rout
 
 - [ ] Multiple open buffers with a quick switcher
 - [ ] Tabs and split views with explicit focus commands
-- [ ] File picker and lightweight project explorer
+- [x] Git-aware fuzzy file picker
+- [ ] Lightweight project explorer
 - [ ] Recent files and optional session restoration
 - [ ] File watching with a deliberate reload/diff/keep decision on conflicts
 - [ ] Workspace search that streams results and remains cancellable

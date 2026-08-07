@@ -9,11 +9,18 @@ test.skipIf(process.platform !== "darwin")(
       set timeout 5
       spawn -noecho sh -c {before="$(stty -g)"; bun run src/index.ts "$EDITOR_TEST_FILE"; editor_status=$?; after="$(stty -g)"; if [ "$before" = "$after" ]; then printf "\n__TTY_RESTORED__\n"; else printf "\n__TTY_CHANGED__\n"; fi; exit "$editor_status"}
       expect {
-        -re {README.md} { send -- "\021" }
+        -re {README.md} {
+          set close_started [clock milliseconds]
+          send -- "\021"
+        }
         timeout { exit 124 }
       }
       expect {
-        -re {__TTY_RESTORED__} {}
+        -re {__TTY_RESTORED__} {
+          set close_ms [expr {[clock milliseconds] - $close_started}]
+          puts "\n__CLOSE_MS__=$close_ms\n"
+          if {$close_ms > 1000} { exit 126 }
+        }
         -re {__TTY_CHANGED__} { exit 125 }
         timeout { exit 124 }
       }

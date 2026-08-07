@@ -22,7 +22,7 @@ test("invalid arguments return usage without opening an editor", async () => {
 
 test("opens the resolved file and returns success after the editor closes", async () => {
   const controller = new AbortController()
-  let request: { filePath: string; signal: AbortSignal } | undefined
+  let request: { filePath: string; workspaceRoot: string; signal: AbortSignal } | undefined
 
   const result = await runCli(["notes/today.md"], {
     signal: controller.signal,
@@ -34,6 +34,7 @@ test("opens the resolved file and returns success after the editor closes", asyn
 
   expect(request).toEqual({
     filePath: resolve("notes/today.md"),
+    workspaceRoot: resolve("."),
     signal: controller.signal,
   })
   expect(result).toEqual({ exitCode: 0 })

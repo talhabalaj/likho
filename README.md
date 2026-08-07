@@ -2,10 +2,10 @@
 
 Likho is a small, focused terminal text editor built with [Bun](https://bun.sh/) and
 [OpenTUI](https://github.com/anomalyco/opentui). It opens quickly, uses familiar VS Code-style
-shortcuts, highlights source code with Tree-sitter, and treats saving your work as the feature that
-must never be clever.
+shortcuts and Quick Open, highlights source code with Tree-sitter, and treats saving your work as
+the feature that must never be clever.
 
-> Likho is early software. Today it is intentionally a single-file editor, not an IDE.
+> Likho is early software. Today it keeps one active file at a time, not a tabbed IDE workspace.
 
 ## Try it
 
@@ -34,6 +34,7 @@ Passing a path that does not exist opens an empty buffer and creates the file wh
 
 - Single-file editing in a full-screen terminal UI
 - Line-number gutter, mouse-wheel scrolling, selection, undo, and redo
+- Workspace Quick Open with fuzzy file matching and a searchable command palette
 - Tree-sitter syntax highlighting selected from the file extension
 - Prettier formatting selected from the file extension
 - Unicode-aware highlight columns and visible tab characters
@@ -51,6 +52,8 @@ Passing a path that does not exist opens an empty buffer and creates the file wh
 | Action | Shortcut |
 | --- | --- |
 | Save | `Mod+S` |
+| Quick Open | `Mod+P` |
+| Command palette | `Mod+Shift+P`, or type `>` at the start of Quick Open |
 | Close | `Mod+W` or `Ctrl+Q` |
 | Copy | `Mod+C` |
 | Cut | `Mod+X` |
@@ -65,14 +68,15 @@ Passing a path that does not exist opens an empty buffer and creates the file wh
 | Insert a tab | `Tab` |
 
 If the document is dirty, the first close warns you and the second close discards the changes.
+Opening another file uses the same two-step confirmation and keeps the picker open until confirmed.
 
 ## Current limits
 
 - Bun is the supported runtime; the npm package does not run under Node.js alone.
-- One file is open per process. There are no tabs, splits, explorer, project model, or settings UI yet.
-- Files larger than 900,000 bytes are rejected while OpenTUI's buffer export is limited.
+- One file is active at a time. There are no tabs, splits, explorer, project model, or settings UI yet.
+- Files larger than 900,000 bytes or 100,000 lines are rejected while OpenTUI's buffer export is limited.
 - Syntax highlighting is disabled above 200,000 bytes until edits can be sent incrementally.
-- Formatting is disabled above 200,000 bytes to keep the input loop responsive.
+- Formatting is explicit and available for supported files, but may pause the UI on larger documents.
 - Clipboard support depends on the terminal accepting OSC 52.
 - The plugin host currently organizes trusted built-ins. It does not load third-party code.
 
@@ -108,7 +112,9 @@ src/index.ts                  process signals and exit status
 src/cli.ts                    argument validation and CLI results
 src/document.ts               document state and safe-save rules
 src/editor-session.ts         OpenTUI session and capability adapters
-src/plugins/                  built-in commands, chrome, gutter, formatting, highlighting, and host
+src/quick-input.ts            Quick Open state, cancellation, selection, and acceptance
+src/workspace-files.ts        Git-aware workspace file discovery with a Bun fallback
+src/plugins/                  built-in commands, palette UI, chrome, gutter, formatting, and highlighting
 test/                         document, CLI, session, packaging, and lifecycle tests
 docs/                         design and technology research
 ```

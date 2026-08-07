@@ -9,7 +9,9 @@ export type CliResult = Readonly<{
   stderr?: string
 }>
 
-export type EditFile = (request: Readonly<{ filePath: string; signal: AbortSignal }>) => Promise<EditorSessionResult>
+export type EditFile = (
+  request: Readonly<{ filePath: string; workspaceRoot: string; signal: AbortSignal }>,
+) => Promise<EditorSessionResult>
 
 const SIGNAL_EXIT_CODES: Record<CliSignal, 129 | 130 | 143> = {
   SIGHUP: 129,
@@ -26,14 +28,19 @@ function abortedSignal(reason: unknown): CliSignal | undefined {
 
 export async function runCli(
   argv: readonly string[],
-  options: Readonly<{ signal: AbortSignal; editFile?: EditFile }>,
+  options: Readonly<{ signal: AbortSignal; cwd?: string; editFile?: EditFile }>,
 ): Promise<CliResult> {
   if (argv.length !== 1 || !argv[0]) {
     return { exitCode: 2, stderr: "Usage: likho <file>\n" }
   }
 
   try {
-    const result = await (options.editFile ?? runEditorSession)({ filePath: resolve(argv[0]), signal: options.signal })
+    const workspaceRoot = resolve(options.cwd ?? process.cwd())
+    const result = await (options.editFile ?? runEditorSession)({
+      filePath: resolve(workspaceRoot, argv[0]),
+      workspaceRoot,
+      signal: options.signal,
+    })
     if (result.kind === "closed") return { exitCode: 0 }
     const signal = abortedSignal(result.reason)
     return signal ? { exitCode: SIGNAL_EXIT_CODES[signal] } : { exitCode: 1, stderr: "Editor cancelled\n" }

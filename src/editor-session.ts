@@ -1,5 +1,6 @@
 import {
   BoxRenderable,
+  CliRenderEvents,
   SyntaxStyle,
   SlotRenderable,
   TextareaRenderable,
@@ -11,7 +12,7 @@ import {
 import { registerDefaultKeys, registerMetadataFields, registerModBindings } from "@opentui/keymap/addons"
 import { registerManagedTextareaLayer } from "@opentui/keymap/addons/opentui"
 import { createOpenTuiKeymap } from "@opentui/keymap/opentui"
-import { basename } from "node:path"
+import { basename, dirname } from "node:path"
 import { openDocument } from "./document"
 import { createBuiltins } from "./plugins/builtins"
 import { createChrome, type ChromePlugin } from "./plugins/chrome"
@@ -78,7 +79,7 @@ function resolveStyleId(style: SyntaxStyle, group: string): number | null {
 }
 
 export async function runEditorSession(
-  request: Readonly<{ filePath: string; signal: AbortSignal }>,
+  request: Readonly<{ filePath: string; workspaceRoot?: string; signal: AbortSignal }>,
   dependencies: EditorSessionDependencies = {
     createRenderer: () => createCliRenderer({ exitOnCtrlC: false }),
   },
@@ -95,7 +96,8 @@ export async function runEditorSession(
   try {
     const syntaxStyle = SyntaxStyle.fromStyles(DARK_PLUS_STYLES)
     resources.add(() => syntaxStyle.destroy())
-    let quitArmedText: string | null = null
+    let quitArmedVersion: number | null = null
+    let openArmed: Readonly<{ path: string; version: number }> | undefined
     let finish!: (result: EditorSessionResult) => void
     const finished = new Promise<EditorSessionResult>((resolve) => {
       finish = (result) => {
@@ -121,9 +123,26 @@ export async function runEditorSession(
     statusBar.add(status)
 
     let chrome!: ChromePlugin
+    let changePending = false
+    let replacingDocument = false
+    let suppressDocumentChange = false
+    const flushDocumentChange = () => {
+      if (!changePending) return
+      changePending = false
+      if (closing) return
+      document.markChanged()
+      quitArmedVersion = null
+      openArmed = undefined
+      if (ready) chrome.clearMessage()
+    }
+    const queueDocumentChange = () => {
+      if (closing || changePending) return
+      changePending = true
+      queueMicrotask(flushDocumentChange)
+    }
 
     const editor = new TextareaRenderable(renderer, {
-      initialValue: document.snapshot.text,
+      initialValue: document.initialText,
       width: "100%",
       height: "100%",
       wrapMode: "none",
@@ -135,10 +154,12 @@ export async function runEditorSession(
       tabIndicator: "→",
       tabIndicatorColor: "#404040",
       onContentChange: () => {
-        if (!ready) return
-        chrome.clearMessage()
-        document.replaceText(editor.plainText)
-        quitArmedText = null
+        if (suppressDocumentChange) {
+          suppressDocumentChange = false
+          return
+        }
+        if (!ready || replacingDocument) return
+        queueDocumentChange()
       },
     })
     chrome = createChrome({ editor, title, status })
@@ -168,12 +189,20 @@ export async function runEditorSession(
     const report = (nextMessage: string) => {
       chrome.report(nextMessage)
     }
+    const captureText = () => {
+      if (closing || lifetime.signal.aborted) throw new Error("Editor is closing")
+      flushDocumentChange()
+      const text = editor.plainText
+      document.validateText(text)
+      return { text, version: document.snapshot.version }
+    }
     const save = () => {
       if (closing) return
       try {
-        document.replaceText(editor.plainText)
-        document.save()
-        quitArmedText = null
+        const captured = captureText()
+        document.save(captured.text)
+        quitArmedVersion = null
+        openArmed = undefined
         report(`Saved ${basename(document.snapshot.path)}`)
       } catch (error) {
         report(error instanceof Error ? error.message : String(error))
@@ -181,27 +210,68 @@ export async function runEditorSession(
     }
     const copy = (cut: boolean) => {
       if (closing) return
-      const selected = editor.getSelectedText()
-      const line = editor.plainText.split("\n")[editor.logicalCursor.row] ?? ""
-      if (!renderer.copyToClipboardOSC52(selected || `${line}\n`)) {
-        report("Clipboard unavailable; nothing was cut")
-      } else if (cut) {
-        selected ? editor.deleteSelection() : editor.deleteLine()
-        report("Cut to clipboard")
-      } else {
-        report("Copied to clipboard")
+      try {
+        const captured = captureText()
+        const selected = editor.getSelectedText()
+        const line = captured.text.split("\n")[editor.logicalCursor.row] ?? ""
+        if (!renderer.copyToClipboardOSC52(selected || `${line}\n`)) {
+          report("Clipboard unavailable; nothing was cut")
+        } else if (cut) {
+          selected ? editor.deleteSelection() : editor.deleteLine()
+          report("Cut to clipboard")
+        } else {
+          report("Copied to clipboard")
+        }
+      } catch (error) {
+        report(error instanceof Error ? error.message : String(error))
       }
     }
     const requestClose = () => {
       if (closing) return
-      document.replaceText(editor.plainText)
+      flushDocumentChange()
       const snapshot = document.snapshot
-      if (snapshot.dirty && quitArmedText !== snapshot.text) {
-        quitArmedText = snapshot.text
+      if (snapshot.dirty && quitArmedVersion !== snapshot.version) {
+        quitArmedVersion = snapshot.version
         report("Unsaved changes — repeat close to discard")
         return
       }
       finish({ kind: "closed" })
+    }
+    const requestOpenFile = (path: string) => {
+      if (closing) return false
+      flushDocumentChange()
+      const snapshot = document.snapshot
+      if (path === snapshot.path) return true
+      if (snapshot.dirty && (openArmed?.path !== path || openArmed.version !== snapshot.version)) {
+        openArmed = { path, version: snapshot.version }
+        report("Unsaved changes — press Enter again to discard")
+        return false
+      }
+      try {
+        replacingDocument = true
+        document.open(path, (text) => {
+          suppressDocumentChange = true
+          editor.setText(text)
+          editor.setCursor(0, 0)
+          queueMicrotask(() => {
+            suppressDocumentChange = false
+          })
+        })
+        quitArmedVersion = null
+        openArmed = undefined
+        report(`Opened ${basename(path)}`)
+        return true
+      } catch (error) {
+        report(error instanceof Error ? error.message : String(error))
+        return false
+      } finally {
+        replacingDocument = false
+      }
+    }
+    const getVisibleLineRange = () => {
+      const viewport = editor.editorView.getViewport()
+      const start = Math.max(0, Math.floor(viewport.offsetY))
+      return { start, end: Math.max(start, Math.ceil(viewport.offsetY + viewport.height)) }
     }
 
     pluginHost = new PluginHost<EditorPluginContext>(
@@ -210,6 +280,7 @@ export async function runEditorSession(
         document,
         commands,
         actions: {
+          captureText,
           save,
           copy: () => copy(false),
           cut: () => copy(true),
@@ -218,14 +289,36 @@ export async function runEditorSession(
           },
           applyText: (expectedVersion, text) => {
             if (closing || lifetime.signal.aborted || document.snapshot.version !== expectedVersion) return false
+            document.validateText(text)
             editor.replaceText(text)
-            document.replaceText(editor.plainText)
+            queueDocumentChange()
+            flushDocumentChange()
             return true
           },
+          cancelOpenFileRequest: () => {
+            openArmed = undefined
+          },
+          requestOpenFile,
           requestClose,
         },
         syntax: {
           bufferId: editor.editBuffer.id,
+          getVisibleLineRange,
+          onVisibleLineRangeChange(listener) {
+            let previous = getVisibleLineRange()
+            const onFrame = () => {
+              const next = getVisibleLineRange()
+              if (next.start === previous.start && next.end === previous.end) return
+              previous = next
+              listener(next)
+            }
+            renderer.on(CliRenderEvents.FRAME, onFrame)
+            return {
+              dispose() {
+                renderer.off(CliRenderEvents.FRAME, onFrame)
+              },
+            }
+          },
           clear: () => editor.clearAllHighlights(),
           add: ({ line, ...highlight }) => editor.addHighlight(line, highlight),
           resolveStyleId: (group) => resolveStyleId(syntaxStyle, group),
@@ -247,6 +340,12 @@ export async function runEditorSession(
       createBuiltins({
         chrome: chrome.plugin,
         lineNumbers: { renderer, editor, slots: uiSlots },
+        quickInput: {
+          renderer,
+          root,
+          editor,
+          workspaceRoot: request.workspaceRoot ?? dirname(request.filePath),
+        },
       })
     await pluginHost.activate(plugins, lifetime.signal)
     if (closing || lifetime.signal.aborted) return await finished
