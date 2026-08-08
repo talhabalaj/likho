@@ -1,18 +1,13 @@
 {
   "name": "likho",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "Very sweet CLI text editor",
   "repository": {
     "type": "git",
     "url": "https://github.com/talhabalaj/likho.git"
   },
+  "private": true,
   "type": "module",
-  "bin": {
-    "likho": "bin/likho.js"
-  },
-  "files": [
-    "bin"
-  ],
   "engines": {
     "node": ">=18"
   },
@@ -23,7 +18,7 @@
   "scripts": {
     "build": "bun build src/index.ts --target=bun --packages external --outfile dist/index.js",
     "release:build": "bun run scripts/build-release.ts",
-    "prepack": "bun test && bun run typecheck",
+    "release:publish": "bun run scripts/publish-npm-release.ts dist/npm",
     "start": "bun run src/index.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"

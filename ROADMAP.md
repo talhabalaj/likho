@@ -16,7 +16,7 @@ a promise of dates, and priorities may move when real usage exposes a better ord
 - [x] Signal-aware startup and teardown
 - [x] Lifecycle-managed built-in plugin boundary
 - [x] Unit, integration, renderer, and packaging tests
-- [x] npm distribution through a Bun executable entry point
+- [x] npm distribution through platform-native Bun executables; Bun is not required to install
 
 ## 0.1 — trustworthy distribution
 
@@ -24,9 +24,10 @@ The next release line should make installing and trusting Likho boring.
 
 - [ ] Add CI for tests, type-checking, packaging, and clean working-tree builds
 - [ ] Define and test the supported operating-system and terminal matrix
-- [ ] Add `--help` and `--version`
-- [ ] Publish signed standalone binaries through GitHub Releases
-- [ ] Automate npm and binary releases from version tags
+- [ ] Add `--help`
+- [x] Add `--version`
+- [x] Publish standalone binaries through GitHub Releases
+- [x] Automate native npm packages and binary releases from version tags
 - [ ] Add an explicit open-source license
 - [ ] Add a short terminal demo and issue templates
 - [x] Make saves atomic while retaining external-change detection

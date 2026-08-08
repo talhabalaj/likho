@@ -1,4 +1,5 @@
 import { resolve } from "node:path"
+import manifest from "../package.json" with { type: "json" }
 import { runEditorSession, type EditorSessionResult } from "./editor-session"
 
 export type CliSignal = "SIGHUP" | "SIGINT" | "SIGTERM"
@@ -30,6 +31,10 @@ export async function runCli(
   argv: readonly string[],
   options: Readonly<{ signal: AbortSignal; cwd?: string; editFile?: EditFile }>,
 ): Promise<CliResult> {
+  if (argv.length === 1 && (argv[0] === "--version" || argv[0] === "-v")) {
+    return { exitCode: 0, stdout: `${manifest.version}\n` }
+  }
+
   if (argv.length !== 1 || !argv[0]) {
     return { exitCode: 2, stderr: "Usage: likho <file>\n" }
   }

@@ -1,6 +1,22 @@
 import { expect, test } from "bun:test"
 import { resolve } from "node:path"
+import manifest from "../package.json" with { type: "json" }
 import { runCli } from "../src/cli"
+
+test("prints the package version without opening an editor", async () => {
+  let opened = false
+
+  const result = await runCli(["--version"], {
+    signal: new AbortController().signal,
+    editFile: async () => {
+      opened = true
+      return { kind: "closed" }
+    },
+  })
+
+  expect(result).toEqual({ exitCode: 0, stdout: `${manifest.version}\n` })
+  expect(opened).toBe(false)
+})
 
 test("invalid arguments return usage without opening an editor", async () => {
   let opened = false

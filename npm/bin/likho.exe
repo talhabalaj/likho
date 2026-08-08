@@ -1,0 +1,12 @@
+#!/bin/sh
+
+echo "Error: Likho's postinstall script was not run." >&2
+echo "" >&2
+echo "This can happen when installing with --ignore-scripts or with a package manager" >&2
+echo "that does not run dependency postinstall scripts by default." >&2
+echo "" >&2
+echo "Fix it by running:" >&2
+echo "  cd node_modules/likho && node postinstall.mjs" >&2
+echo "" >&2
+echo "Or reinstall likho without --ignore-scripts." >&2
+exit 1

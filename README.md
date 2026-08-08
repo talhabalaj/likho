@@ -9,8 +9,7 @@ the feature that must never be clever.
 
 ## Try it
 
-Run Likho through npm; the first launch downloads and caches the standalone binary for your
-platform:
+Run Likho through npm. npm installs the standalone binary for your operating system and CPU:
 
 ```sh
 npx likho@latest README.md
@@ -23,8 +22,9 @@ npm install --global likho
 likho README.md
 ```
 
-The npm launcher requires Node.js 18 or newer, but the editor binary includes its own Bun runtime.
-Standalone release downloads support macOS, glibc and musl Linux, and Windows on ARM64 and x64.
+You need Node.js 18 or newer to install through npm, but you do not need Bun: the installed editor
+is a self-contained executable. npm selects one optional native package for macOS, glibc or musl
+Linux, or Windows on ARM64 and x64. The same executables remain available from GitHub Releases.
 
 Passing a path that does not exist opens an empty buffer and creates the file when you save it.
 
@@ -70,7 +70,8 @@ Opening another file uses the same two-step confirmation and keeps the picker op
 
 ## Current limits
 
-- The npm launcher downloads roughly 27–48 MB on first use and caches that version's binary.
+- A platform package is roughly 27–48 MB compressed; its installed executable currently occupies
+  roughly 77–134 MB, depending on the target.
 - One file is active at a time. There are no tabs, splits, explorer, project model, or settings UI yet.
 - Files larger than 900,000 bytes or 100,000 lines are rejected while OpenTUI's buffer export is limited.
 - Syntax highlighting parses the whole document but paints only the viewport plus 10 overscan lines; it is disabled above 200,000 bytes until edits can be sent incrementally.
@@ -103,6 +104,14 @@ bun build --compile --minify src/index.ts --outfile dist/likho
 ./dist/likho README.md
 ```
 
+`bun run release:build` cross-compiles every supported executable into `dist/release` and generates
+the npm wrapper plus its eight platform packages in `dist/npm`. The release workflow publishes the
+native packages first and `likho` last, so users never receive a wrapper whose exact-version binary
+is missing. See [docs/RELEASING.md](docs/RELEASING.md) for the tag flow and one-time npm bootstrap.
+
+If a package manager disables install scripts, run `node postinstall.mjs` inside its installed
+`likho` directory or reinstall without `--ignore-scripts`.
+
 ## Project layout
 
 ```text
@@ -113,6 +122,7 @@ src/editor-session.ts         OpenTUI session and capability adapters
 src/quick-input.ts            Quick Open state, cancellation, selection, and acceptance
 src/workspace-files.ts        Git-aware workspace file discovery with a Bun fallback
 src/plugins/                  built-in commands, palette UI, chrome, gutter, formatting, and highlighting
+npm/                          generated-package installer and ignored-script fallback
 test/                         document, CLI, session, packaging, and lifecycle tests
 docs/                         design and technology research
 ```
