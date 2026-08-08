@@ -365,7 +365,7 @@ test("the gutter renders line numbers beyond 99", async () => {
   if (process.platform === "darwin") {
     setup.mockInput.pressArrow("down", { super: true })
   } else {
-    setup.mockInput.pressKey("end", { ctrl: true })
+    setup.mockInput.pressKey("END", { ctrl: true })
   }
   await setup.waitForFrame((frame) => frame.includes("105 line 105"))
 
@@ -449,7 +449,7 @@ test("syntax highlighting follows the editor viewport", async () => {
     if (process.platform === "darwin") {
       setup.mockInput.pressArrow("down", { super: true })
     } else {
-      setup.mockInput.pressKey("end", { ctrl: true })
+      setup.mockInput.pressKey("END", { ctrl: true })
     }
 
     let bottomHighlighted = false
