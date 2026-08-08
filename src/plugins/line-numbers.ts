@@ -1,16 +1,11 @@
-import {
-  LineNumberRenderable,
-  registerCorePlugin,
-  type CliRenderer,
-  type CoreSlotRegistry,
-  type TextareaRenderable,
-} from "@opentui/core"
+import { LineNumberRenderable, registerCorePlugin, type CliRenderer, type TextareaRenderable } from "@opentui/core"
 import type { BuiltinPlugin, EditorPluginContext } from "./host"
+import type { EditorSlotRegistry } from "./editor-slots"
 
 export interface LineNumberPluginDependencies {
   readonly renderer: CliRenderer
   readonly editor: TextareaRenderable
-  readonly slots: CoreSlotRegistry<"editor-frame", object, object>
+  readonly slots: EditorSlotRegistry
 }
 
 export function createLineNumbers({

@@ -2,10 +2,14 @@ import type { TextareaRenderable, TextRenderable } from "@opentui/core"
 import { basename } from "node:path"
 import type { BuiltinPlugin, EditorPluginContext } from "./host"
 
+export const STATUS_MESSAGE_DURATION_MS = 2_000
+
 export interface ChromePluginDependencies {
   readonly editor: TextareaRenderable
   readonly title: TextRenderable
   readonly status: TextRenderable
+  documentTitle?(path: string): string
+  messageDurationMs?: number
 }
 
 export interface ChromePlugin {
@@ -14,9 +18,22 @@ export interface ChromePlugin {
   clearMessage(): void
 }
 
-export function createChrome({ editor, title, status }: ChromePluginDependencies): ChromePlugin {
+export function createChrome({
+  editor,
+  title,
+  status,
+  documentTitle = basename,
+  messageDurationMs = STATUS_MESSAGE_DURATION_MS,
+}: ChromePluginDependencies): ChromePlugin {
   let message = ""
   let update: (() => void) | undefined
+  let messageTimer: ReturnType<typeof setTimeout> | undefined
+
+  const cancelMessageTimer = () => {
+    if (!messageTimer) return
+    clearTimeout(messageTimer)
+    messageTimer = undefined
+  }
 
   const refresh = () => update?.()
   return {
@@ -27,7 +44,7 @@ export function createChrome({ editor, title, status }: ChromePluginDependencies
           const cursor = editor.logicalCursor
           const snapshot = context.document.snapshot
           const shortcutPrefix = context.commands.platform === "macos" ? "⌘" : "Ctrl+"
-          title.content = ` ${basename(snapshot.path)}${snapshot.dirty ? " •" : ""} — editor`
+          title.content = ` ${documentTitle(snapshot.path)}${snapshot.dirty ? " •" : ""} — editor`
           status.content =
             message ||
             ` Ln ${cursor.row + 1}, Col ${cursor.col + 1}   UTF-8   ${shortcutPrefix}S Save   Ctrl+Q Quit`
@@ -36,6 +53,7 @@ export function createChrome({ editor, title, status }: ChromePluginDependencies
         const previousCursorHandler = editor.onCursorChange
         editor.onCursorChange = update
         context.subscriptions.add(() => {
+          cancelMessageTimer()
           if (editor.onCursorChange === update) editor.onCursorChange = previousCursorHandler
           update = undefined
         })
@@ -49,10 +67,17 @@ export function createChrome({ editor, title, status }: ChromePluginDependencies
       },
     },
     report(nextMessage) {
+      cancelMessageTimer()
       message = ` ${nextMessage}`
       refresh()
+      messageTimer = setTimeout(() => {
+        messageTimer = undefined
+        message = ""
+        refresh()
+      }, messageDurationMs)
     },
     clearMessage() {
+      cancelMessageTimer()
       if (!message) return
       message = ""
       refresh()

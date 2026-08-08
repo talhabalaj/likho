@@ -27,19 +27,26 @@ is a self-contained executable. npm selects one optional native package for macO
 Linux, or Windows on ARM64 and x64. The same executables remain available from GitHub Releases.
 
 Passing a path that does not exist opens an empty buffer and creates the file when you save it.
+Passing a folder opens workspace mode with the Explorer focused; passing a file keeps the UI
+file-only.
+
+```sh
+likho .
+```
 
 ## What works today
 
 - Single-file editing in a full-screen terminal UI
 - Line-number gutter, mouse-wheel scrolling, selection, undo, and redo
 - Workspace Quick Open with fuzzy file matching and a searchable command palette
+- Lazy filesystem Explorer for folder launches, with keyboard and mouse navigation
 - Tree-sitter syntax highlighting selected from the file extension
 - Prettier formatting selected from the file extension
 - Unicode-aware highlight columns and visible tab characters
 - Dirty-state, cursor-position, encoding, and shortcut indicators
 - OSC 52 clipboard copy and cut when supported by the terminal
 - Safe saves that refuse to overwrite a file changed by another process
-- A second-close confirmation before discarding unsaved changes
+- Save / Don't Save / Cancel confirmation before closing an unsaved document
 - Graceful `SIGHUP`, `SIGINT`, and `SIGTERM` shutdown
 - Built-in commands, keybindings, and highlighting behind a small lifecycle-managed plugin host
 
@@ -52,6 +59,8 @@ Passing a path that does not exist opens an empty buffer and creates the file wh
 | Save | `Mod+S` |
 | Quick Open | `Mod+P` |
 | Command palette | `Mod+Shift+P`, or type `>` at the start of Quick Open |
+| Show Explorer / toggle focus | `Mod+Shift+E` |
+| Toggle Explorer visibility | `Mod+B` |
 | Close | `Mod+W` or `Ctrl+Q` |
 | Copy | `Mod+C` |
 | Cut | `Mod+X` |
@@ -65,14 +74,18 @@ Passing a path that does not exist opens an empty buffer and creates the file wh
 | Start/end of document | `Command+Up/Down` on macOS, `Ctrl+Home/End` elsewhere |
 | Insert a tab | `Tab` |
 
-If the document is dirty, the first close warns you and the second close discards the changes.
+If the document is dirty, closing opens a Save / Don't Save / Cancel dialog.
 Opening another file uses the same two-step confirmation and keeps the picker open until confirmed.
+In the Explorer, arrows move and expand/collapse rows, `Enter` opens or toggles the selected row,
+and `Escape` returns focus to the editor. Clicking a file opens it, clicking a folder toggles it, and
+the mouse wheel scrolls the tree.
 
 ## Current limits
 
 - A platform package is roughly 27–48 MB compressed; its installed executable currently occupies
   roughly 77–134 MB, depending on the target.
-- One file is active at a time. There are no tabs, splits, explorer, project model, or settings UI yet.
+- One file is active at a time. There are no tabs, splits, multi-root workspaces, or settings UI yet.
+- The Explorer appears only for folder launches and does not yet watch, create, rename, or delete files.
 - Files larger than 900,000 bytes or 100,000 lines are rejected while OpenTUI's buffer export is limited.
 - Syntax highlighting parses the whole document but paints only the viewport plus 10 overscan lines; it is disabled above 200,000 bytes until edits can be sent incrementally.
 - Formatting is explicit and available for supported files, but may pause the UI on larger documents.
@@ -119,6 +132,8 @@ src/index.ts                  process signals and exit status
 src/cli.ts                    argument validation and CLI results
 src/document.ts               document state and safe-save rules
 src/editor-session.ts         OpenTUI session and capability adapters
+src/explorer-source.ts        lazy local-filesystem Explorer adapter
+src/explorer-tree.ts          headless Explorer state and navigation
 src/quick-input.ts            Quick Open state, cancellation, selection, and acceptance
 src/workspace-files.ts        Git-aware workspace file discovery with a Bun fallback
 src/plugins/                  built-in commands, palette UI, chrome, gutter, formatting, and highlighting
@@ -129,8 +144,9 @@ docs/                         design and technology research
 
 The editor core owns document safety and terminal lifecycle. Built-ins receive narrow capabilities
 for commands, keybindings, syntax decorations, and status messages; OpenTUI-only UI built-ins are
-composed with explicit render dependencies. No built-in receives filesystem access through the host.
-This keeps today's implementation small while preserving a credible seam for future isolation.
+composed with explicit render dependencies. The Explorer plugin receives a narrow `ExplorerSource`
+adapter and still opens files only through the editor action boundary. This keeps today's
+implementation small while preserving a credible seam for future isolation.
 
 ## Status
 

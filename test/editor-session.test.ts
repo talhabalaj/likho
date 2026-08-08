@@ -1,9 +1,10 @@
 import { afterEach, expect, test } from "bun:test"
 import { createTestRenderer } from "@opentui/core/testing"
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { runEditorSession } from "../src/editor-session"
+import { STATUS_MESSAGE_DURATION_MS } from "../src/plugins/chrome"
 import type { BuiltinPlugin, EditorPluginContext } from "../src/plugins/host"
 
 const dirs: string[] = []
@@ -15,7 +16,7 @@ test("a signal closes the session and destroys the renderer", async () => {
   const setup = await createTestRenderer({ width: 80, height: 24, otherModifiersMode: true })
   const controller = new AbortController()
   const session = runEditorSession(
-    { filePath: join(dir, "note.txt"), signal: controller.signal },
+    { kind: "file", filePath: join(dir, "note.txt"), signal: controller.signal },
     { createRenderer: async () => setup.renderer },
   )
 
@@ -39,11 +40,16 @@ test("user close aborts the plugin lifetime after dirty-close confirmation", asy
     id: "builtin.close-probe",
     activate(context) {
       pluginSignal = context.signal
+      let discardArmed = false
       context.subscriptions.add(
         context.commands.registerCommand({
           id: "window.close",
           title: "Close Editor",
-          run: context.actions.requestClose,
+          run: () => {
+            if (context.actions.requestClose()) return
+            if (discardArmed) context.actions.discardAndClose()
+            discardArmed = true
+          },
         }),
       )
       context.subscriptions.add(context.commands.registerBindings([{ key: "ctrl+q", command: "window.close" }]))
@@ -51,7 +57,7 @@ test("user close aborts the plugin lifetime after dirty-close confirmation", asy
     },
   }
   const session = runEditorSession(
-    { filePath: join(dir, "note.txt"), signal: new AbortController().signal },
+    { kind: "file", filePath: join(dir, "note.txt"), signal: new AbortController().signal },
     { createRenderer: async () => setup.renderer, plugins: [closeProbe] },
   )
 
@@ -84,7 +90,7 @@ test("a signal can stop a session while plugin activation is pending", async () 
     },
   }
   const session = runEditorSession(
-    { filePath: join(dir, "note.txt"), signal: controller.signal },
+    { kind: "file", filePath: join(dir, "note.txt"), signal: controller.signal },
     { createRenderer: async () => setup.renderer, plugins: [pending] },
   )
 
@@ -105,39 +111,71 @@ test("VS Code keybindings save through the document kernel and close the editor"
   const path = join(dir, "note.txt")
   const setup = await createTestRenderer({ width: 80, height: 24, otherModifiersMode: true })
   const session = runEditorSession(
-    { filePath: path, signal: new AbortController().signal },
+    { kind: "file", filePath: path, signal: new AbortController().signal },
     { createRenderer: async () => setup.renderer },
   )
 
   await setup.waitForFrame((frame) => frame.includes("note.txt"))
   await setup.mockInput.typeText("hello")
   setup.mockInput.pressKey("s", process.platform === "darwin" ? { super: true } : { ctrl: true })
-  await setup.waitForFrame((frame) => frame.includes("Saved note.txt"))
+  await setup.waitFor(() => existsSync(path) && readFileSync(path, "utf8") === "hello")
   setup.mockInput.pressKey("q", { ctrl: true })
 
   expect(await session).toEqual({ kind: "closed" })
   expect(readFileSync(path, "utf8")).toBe("hello")
 })
 
-test("a dirty document requires the close command twice before discarding", async () => {
+test("a dirty document opens a Save, Don't Save, or Cancel close dialog", async () => {
   const dir = mkdtempSync(join(tmpdir(), "editor-session-test-"))
   dirs.push(dir)
   const path = join(dir, "note.txt")
   const setup = await createTestRenderer({ width: 80, height: 24, otherModifiersMode: true })
   const session = runEditorSession(
-    { filePath: path, signal: new AbortController().signal },
+    { kind: "file", filePath: path, signal: new AbortController().signal },
     { createRenderer: async () => setup.renderer },
   )
 
   await setup.waitForFrame((frame) => frame.includes("note.txt"))
   await setup.mockInput.typeText("draft")
   setup.mockInput.pressKey("q", { ctrl: true })
-  await setup.waitForFrame((frame) => frame.includes("Unsaved changes"))
+  await setup.waitForFrame(
+    (frame) => frame.includes("Do you want to save the changes") && frame.includes("Don't Save") && frame.includes("Cancel"),
+  )
 
   expect(setup.renderer.isDestroyed).toBe(false)
+  setup.mockInput.pressKey("p", process.platform === "darwin" ? { super: true } : { ctrl: true })
+  await Bun.sleep(10)
+  expect(setup.captureCharFrame()).not.toContain("Search files by name")
+  setup.mockInput.pressEscape()
+  await Bun.sleep(50)
+  await setup.waitForFrame((frame) => !frame.includes("Do you want to save the changes"))
+
   setup.mockInput.pressKey("q", { ctrl: true })
+  await setup.waitForFrame((frame) => frame.includes("Do you want to save the changes"))
+  setup.mockInput.pressArrow("right")
+  setup.mockInput.pressEnter()
   expect(await session).toEqual({ kind: "closed" })
   expect(existsSync(path)).toBe(false)
+})
+
+test("Save in the close dialog persists the document before closing", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "editor-session-test-"))
+  dirs.push(dir)
+  const path = join(dir, "note.txt")
+  const setup = await createTestRenderer({ width: 80, height: 24, otherModifiersMode: true })
+  const session = runEditorSession(
+    { kind: "file", filePath: path, signal: new AbortController().signal },
+    { createRenderer: async () => setup.renderer },
+  )
+
+  await setup.waitForFrame((frame) => frame.includes("note.txt"))
+  await setup.mockInput.typeText("saved draft")
+  setup.mockInput.pressKey("q", { ctrl: true })
+  await setup.waitForFrame((frame) => frame.includes("Do you want to save the changes"))
+  setup.mockInput.pressEnter()
+
+  expect(await session).toEqual({ kind: "closed" })
+  expect(readFileSync(path, "utf8")).toBe("saved draft")
 })
 
 test("opening a file keeps the session mounted and requires confirmation before discarding edits", async () => {
@@ -147,6 +185,7 @@ test("opening a file keeps the session mounted and requires confirmation before 
   const secondPath = join(dir, "second.txt")
   writeFileSync(firstPath, "first")
   writeFileSync(secondPath, "second")
+  let now = 0
   const setup = await createTestRenderer({ width: 80, height: 24, otherModifiersMode: true })
   const openProbe: BuiltinPlugin<EditorPluginContext> = {
     id: "builtin.open-probe",
@@ -161,7 +200,13 @@ test("opening a file keeps the session mounted and requires confirmation before 
         }),
       )
       context.subscriptions.add(
-        context.commands.registerCommand({ id: "window.close", title: "Close", run: context.actions.requestClose }),
+        context.commands.registerCommand({
+          id: "window.close",
+          title: "Close",
+          run: () => {
+            context.actions.requestClose()
+          },
+        }),
       )
       context.subscriptions.add(
         context.commands.registerBindings([
@@ -172,12 +217,18 @@ test("opening a file keeps the session mounted and requires confirmation before 
     },
   }
   const session = runEditorSession(
-    { filePath: firstPath, signal: new AbortController().signal },
-    { createRenderer: async () => setup.renderer, plugins: [openProbe] },
+    { kind: "file", filePath: firstPath, signal: new AbortController().signal },
+    { createRenderer: async () => setup.renderer, now: () => now, plugins: [openProbe] },
   )
 
   await setup.waitForFrame((frame) => frame.includes("first"))
   await setup.mockInput.typeText("draft")
+  setup.mockInput.pressKey("o", { ctrl: true })
+  await Bun.sleep(10)
+  await setup.flush()
+  expect(setup.captureCharFrame()).toContain("draftfirst")
+
+  now = STATUS_MESSAGE_DURATION_MS + 1
   setup.mockInput.pressKey("o", { ctrl: true })
   await Bun.sleep(10)
   await setup.flush()
@@ -200,7 +251,7 @@ test("Mod+P opens files, a leading greater-than sign switches to commands, and E
   writeFileSync(secondPath, "const second = true\n")
   const setup = await createTestRenderer({ width: 100, height: 24, otherModifiersMode: true })
   const session = runEditorSession(
-    { filePath: firstPath, workspaceRoot: dir, signal: new AbortController().signal },
+    { kind: "folder", filePath: firstPath, workspaceRoot: dir, signal: new AbortController().signal },
     { createRenderer: async () => setup.renderer },
   )
   const mod = process.platform === "darwin" ? { super: true } : { ctrl: true }
@@ -240,7 +291,7 @@ test("Mod+Shift+P opens the shared panel directly in command mode", async () => 
   const path = join(dir, "note.txt")
   const setup = await createTestRenderer({ width: 100, height: 24, otherModifiersMode: true })
   const session = runEditorSession(
-    { filePath: path, workspaceRoot: dir, signal: new AbortController().signal },
+    { kind: "folder", filePath: path, workspaceRoot: dir, signal: new AbortController().signal },
     { createRenderer: async () => setup.renderer },
   )
 
@@ -256,11 +307,138 @@ test("Mod+Shift+P opens the shared panel directly in command mode", async () => 
   await setup.mockInput.typeText("Save")
   await setup.waitForFrame((frame) => frame.includes("Save") && frame.includes("1 result"))
   setup.mockInput.pressEnter()
-  await setup.waitForFrame((frame) => frame.includes("Saved note.txt") && !frame.includes("Show All Commands"))
-  expect(existsSync(path)).toBe(true)
+  await setup.waitFor(() => existsSync(path))
+  await setup.waitForFrame((frame) => !frame.includes("Show All Commands"))
 
   setup.mockInput.pressKey("q", { ctrl: true })
   expect(await session).toEqual({ kind: "closed" })
+})
+
+test("opening a file keeps the editor file-only", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "editor-session-test-"))
+  dirs.push(dir)
+  const path = join(dir, "first.txt")
+  writeFileSync(path, "first")
+  const setup = await createTestRenderer({ width: 100, height: 24, otherModifiersMode: true })
+  const session = runEditorSession(
+    { kind: "file", filePath: path, signal: new AbortController().signal },
+    { createRenderer: async () => setup.renderer },
+  )
+
+  const frame = await setup.waitForFrame((candidate) => candidate.includes("first.txt") && candidate.includes("first"))
+  expect(frame).not.toContain("EXPLORER")
+
+  setup.mockInput.pressKey("q", { ctrl: true })
+  expect(await session).toEqual({ kind: "closed" })
+})
+
+test("opening a folder starts in the Explorer and enables syntax highlighting for its first file", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "editor-session-test-"))
+  dirs.push(dir)
+  const nestedDir = join(dir, "src")
+  const secondPath = join(nestedDir, "second.ts")
+  mkdirSync(nestedDir)
+  writeFileSync(secondPath, "const second = true\n")
+  const setup = await createTestRenderer({ width: 100, height: 24, otherModifiersMode: true })
+  const session = runEditorSession(
+    { kind: "folder", workspaceRoot: dir, signal: new AbortController().signal },
+    { createRenderer: async () => setup.renderer },
+  )
+
+  await setup.waitForFrame(
+    (frame) => frame.includes("No file open") && frame.includes("EXPLORER") && frame.includes("src"),
+  )
+
+  setup.mockInput.pressArrow("right")
+  await setup.waitForFrame((frame) => frame.includes("second.ts"))
+  setup.mockInput.pressArrow("down")
+  await Bun.sleep(10)
+  setup.mockInput.pressEnter()
+  await setup.waitForFrame((frame) => frame.includes("second.ts") && frame.includes("const second = true"))
+  let keywordColor: [number, number, number, number] | undefined
+  for (let attempt = 0; attempt < 40 && !keywordColor; attempt++) {
+    await Bun.sleep(50)
+    await setup.flush()
+    keywordColor = setup
+      .captureSpans()
+      .lines.flatMap((line) => line.spans)
+      .find((span) => span.text === "const")
+      ?.fg.toInts()
+  }
+  expect(keywordColor).toEqual([86, 156, 214, 255])
+
+  setup.mockInput.pressKey("q", { ctrl: true })
+  expect(await session).toEqual({ kind: "closed" })
+})
+
+test("folder mode supports VS Code Explorer shortcuts and auto-hides on narrow terminals", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "editor-session-test-"))
+  dirs.push(dir)
+  writeFileSync(join(dir, "note.txt"), "note")
+  const setup = await createTestRenderer({ width: 100, height: 24, otherModifiersMode: true })
+  const controller = new AbortController()
+  const session = runEditorSession(
+    { kind: "folder", workspaceRoot: dir, signal: controller.signal },
+    { createRenderer: async () => setup.renderer },
+  )
+  const mod = process.platform === "darwin" ? { super: true } : { ctrl: true }
+
+  await setup.waitForFrame((frame) => frame.includes("EXPLORER") && frame.includes("note.txt"))
+  setup.mockInput.pressKey("b", mod)
+  await setup.waitForFrame((frame) => !frame.includes("EXPLORER"))
+  setup.mockInput.pressKey("e", { ...mod, shift: true })
+  await setup.waitForFrame((frame) => frame.includes("EXPLORER") && frame.includes("note.txt"))
+
+  setup.resize(50, 24)
+  await setup.waitForFrame((frame) => !frame.includes("EXPLORER"))
+  setup.mockInput.pressEnter()
+  await setup.waitForFrame((frame) => frame.includes("No file open") && !frame.includes("EXPLORER"))
+  setup.resize(100, 24)
+  await setup.waitForFrame((frame) => frame.includes("EXPLORER") && frame.includes("note.txt"))
+
+  controller.abort({ kind: "signal", signal: "SIGTERM" })
+  expect(await session).toEqual({ kind: "aborted", reason: { kind: "signal", signal: "SIGTERM" } })
+})
+
+test("Ctrl+Q closes a narrow folder session before any file has focus", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "editor-session-test-"))
+  dirs.push(dir)
+  const setup = await createTestRenderer({ width: 50, height: 24, otherModifiersMode: true })
+  const session = runEditorSession(
+    { kind: "folder", workspaceRoot: dir, signal: new AbortController().signal },
+    { createRenderer: async () => setup.renderer },
+  )
+
+  await setup.waitForFrame((frame) => frame.includes("No file open") && !frame.includes("EXPLORER"))
+  setup.mockInput.pressKey("q", { ctrl: true })
+
+  expect(await session).toEqual({ kind: "closed" })
+})
+
+test("the folder Explorer supports mouse selection and native wheel scrolling", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "editor-session-test-"))
+  dirs.push(dir)
+  for (let index = 0; index < 16; index++) {
+    writeFileSync(join(dir, `${String(index).padStart(2, "0")}.txt`), `content ${index}`)
+  }
+  const setup = await createTestRenderer({ width: 100, height: 10, otherModifiersMode: true })
+  const controller = new AbortController()
+  const session = runEditorSession(
+    { kind: "folder", workspaceRoot: dir, signal: controller.signal },
+    { createRenderer: async () => setup.renderer },
+  )
+
+  const initialFrame = await setup.waitForFrame((frame) => frame.includes("00.txt") && frame.includes("05.txt"))
+  expect(initialFrame).not.toContain("06.txt")
+
+  await setup.mockMouse.click(4, 3)
+  await setup.waitForFrame((frame) => frame.includes("00.txt") && frame.includes("content 0"))
+
+  await setup.mockMouse.scroll(4, 6, "down")
+  await setup.waitForFrame((frame) => frame.includes("06.txt"))
+
+  controller.abort({ kind: "signal", signal: "SIGTERM" })
+  expect(await session).toEqual({ kind: "aborted", reason: { kind: "signal", signal: "SIGTERM" } })
 })
 
 test("mouse-wheel navigation in Quick Open changes the file accepted by Enter", async () => {
@@ -272,7 +450,7 @@ test("mouse-wheel navigation in Quick Open changes the file accepted by Enter", 
   const firstPath = join(dir, "00.txt")
   const setup = await createTestRenderer({ width: 100, height: 24, otherModifiersMode: true })
   const session = runEditorSession(
-    { filePath: firstPath, workspaceRoot: dir, signal: new AbortController().signal },
+    { kind: "folder", filePath: firstPath, workspaceRoot: dir, signal: new AbortController().signal },
     { createRenderer: async () => setup.renderer },
   )
 
@@ -297,7 +475,7 @@ test("Quick Open keeps dirty-file confirmation armed only while the candidate st
   writeFileSync(secondPath, "second")
   const setup = await createTestRenderer({ width: 100, height: 24, otherModifiersMode: true })
   const session = runEditorSession(
-    { filePath: firstPath, workspaceRoot: dir, signal: new AbortController().signal },
+    { kind: "folder", filePath: firstPath, workspaceRoot: dir, signal: new AbortController().signal },
     { createRenderer: async () => setup.renderer },
   )
   const mod = process.platform === "darwin" ? { super: true } : { ctrl: true }
@@ -321,7 +499,7 @@ test("Quick Open keeps dirty-file confirmation armed only while the candidate st
   expect(setup.captureCharFrame()).toContain("second.txt")
 
   setup.mockInput.pressEnter()
-  await setup.waitForFrame((frame) => frame.includes("Opened second.txt") && frame.includes("second"))
+  await setup.waitForFrame((frame) => frame.includes("second.txt") && frame.includes("second"))
   setup.mockInput.pressKey("q", { ctrl: true })
   expect(await session).toEqual({ kind: "closed" })
 })
@@ -333,7 +511,7 @@ test("saving never overwrites a file changed by another process", async () => {
   writeFileSync(path, "original")
   const setup = await createTestRenderer({ width: 80, height: 24, otherModifiersMode: true })
   const session = runEditorSession(
-    { filePath: path, signal: new AbortController().signal },
+    { kind: "file", filePath: path, signal: new AbortController().signal },
     { createRenderer: async () => setup.renderer },
   )
 
@@ -344,8 +522,9 @@ test("saving never overwrites a file changed by another process", async () => {
   await setup.waitForFrame((frame) => frame.includes("Save blocked: file changed on disk"))
 
   setup.mockInput.pressKey("q", { ctrl: true })
-  await setup.waitForFrame((frame) => frame.includes("Unsaved changes"))
-  setup.mockInput.pressKey("q", { ctrl: true })
+  await setup.waitForFrame((frame) => frame.includes("Do you want to save the changes"))
+  setup.mockInput.pressArrow("right")
+  setup.mockInput.pressEnter()
   expect(await session).toEqual({ kind: "closed" })
   expect(readFileSync(path, "utf8")).toBe("external")
 })
@@ -357,7 +536,7 @@ test("the gutter renders line numbers beyond 99", async () => {
   writeFileSync(path, Array.from({ length: 105 }, (_, index) => `line ${index + 1}`).join("\n"))
   const setup = await createTestRenderer({ width: 80, height: 10, otherModifiersMode: true })
   const session = runEditorSession(
-    { filePath: path, signal: new AbortController().signal },
+    { kind: "file", filePath: path, signal: new AbortController().signal },
     { createRenderer: async () => setup.renderer },
   )
 
@@ -380,7 +559,7 @@ test("mouse wheel scrolling over the gutter scrolls the editor", async () => {
   writeFileSync(path, Array.from({ length: 40 }, (_, index) => `line ${index + 1}`).join("\n"))
   const setup = await createTestRenderer({ width: 80, height: 10, otherModifiersMode: true })
   const session = runEditorSession(
-    { filePath: path, signal: new AbortController().signal },
+    { kind: "file", filePath: path, signal: new AbortController().signal },
     { createRenderer: async () => setup.renderer },
   )
 
@@ -400,7 +579,7 @@ test("the Tree-sitter built-in applies Dark+ syntax colors", async () => {
   const setup = await createTestRenderer({ width: 80, height: 10, otherModifiersMode: true })
   const controller = new AbortController()
   const session = runEditorSession(
-    { filePath: path, signal: controller.signal },
+    { kind: "file", filePath: path, signal: controller.signal },
     { createRenderer: async () => setup.renderer },
   )
 
@@ -430,7 +609,7 @@ test("syntax highlighting follows the editor viewport", async () => {
   const setup = await createTestRenderer({ width: 80, height: 10, otherModifiersMode: true })
   const controller = new AbortController()
   const session = runEditorSession(
-    { filePath: path, signal: controller.signal },
+    { kind: "file", filePath: path, signal: controller.signal },
     { createRenderer: async () => setup.renderer },
   )
 
@@ -479,7 +658,7 @@ test("Shift+Option/Alt+F formats the current document through a built-in", async
   const setup = await createTestRenderer({ width: 80, height: 10, otherModifiersMode: true })
   const controller = new AbortController()
   const session = runEditorSession(
-    { filePath: path, signal: controller.signal },
+    { kind: "file", filePath: path, signal: controller.signal },
     { createRenderer: async () => setup.renderer },
   )
 
@@ -514,7 +693,7 @@ test("formatter failures are shown in the editor instead of escaping the command
   const setup = await createTestRenderer({ width: 80, height: 10, otherModifiersMode: true })
   const controller = new AbortController()
   const session = runEditorSession(
-    { filePath: path, signal: controller.signal },
+    { kind: "file", filePath: path, signal: controller.signal },
     { createRenderer: async () => setup.renderer },
   )
 

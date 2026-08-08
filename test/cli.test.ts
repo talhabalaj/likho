@@ -1,7 +1,10 @@
 import { expect, test } from "bun:test"
-import { resolve } from "node:path"
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join, resolve } from "node:path"
 import manifest from "../package.json" with { type: "json" }
 import { runCli } from "../src/cli"
+import type { EditorSessionRequest } from "../src/editor-session"
 
 test("prints the package version without opening an editor", async () => {
   let opened = false
@@ -31,14 +34,14 @@ test("invalid arguments return usage without opening an editor", async () => {
 
   expect(result).toEqual({
     exitCode: 2,
-    stderr: "Usage: likho <file>\n",
+    stderr: "Usage: likho <file-or-folder>\n",
   })
   expect(opened).toBe(false)
 })
 
 test("opens the resolved file and returns success after the editor closes", async () => {
   const controller = new AbortController()
-  let request: { filePath: string; workspaceRoot: string; signal: AbortSignal } | undefined
+  let request: EditorSessionRequest | undefined
 
   const result = await runCli(["notes/today.md"], {
     signal: controller.signal,
@@ -49,11 +52,33 @@ test("opens the resolved file and returns success after the editor closes", asyn
   })
 
   expect(request).toEqual({
+    kind: "file",
     filePath: resolve("notes/today.md"),
-    workspaceRoot: resolve("."),
     signal: controller.signal,
   })
   expect(result).toEqual({ exitCode: 0 })
+})
+
+test("opening a folder starts a workspace session without inventing a file", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "editor-cli-test-"))
+  const folder = join(dir, "project")
+  mkdirSync(folder)
+  let request: EditorSessionRequest | undefined
+
+  try {
+    const result = await runCli([folder], {
+      signal: new AbortController().signal,
+      editFile: async (received) => {
+        request = received
+        return { kind: "closed" }
+      },
+    })
+
+    expect(request).toEqual({ kind: "folder", workspaceRoot: folder, signal: expect.any(AbortSignal) })
+    expect(result).toEqual({ exitCode: 0 })
+  } finally {
+    rmSync(dir, { recursive: true })
+  }
 })
 
 test("session startup failures become one-line CLI errors", async () => {

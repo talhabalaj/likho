@@ -31,15 +31,18 @@ test("formatting captures large supported documents only when commanded", async 
       command = next
       return { dispose() {} }
     },
-      registerBindings() {
-        return { dispose() {} }
-      },
-      listCommands() {
-        return []
-      },
-      executeCommand() {
-        return false
-      },
+    registerBindings() {
+      return { dispose() {} }
+    },
+    captureKeyInputWhile() {
+      return { dispose() {} }
+    },
+    listCommands() {
+      return []
+    },
+    executeCommand() {
+      return false
+    },
   }
   const dependencies = {
     getFileInfo: async () => ({ ignored: false, inferredParser: "typescript" }),

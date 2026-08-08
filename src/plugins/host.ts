@@ -54,11 +54,13 @@ export interface CommandContributions {
       scope?: "editor" | "global" | Readonly<{ target: object; mode?: "focus" | "focus-within"; priority?: number }>
     }>,
   ): Disposable
+  captureKeyInputWhile(active: () => boolean, allowedKeys: readonly string[]): Disposable
   listCommands(): readonly Readonly<{ id: string; title: string; keybinding?: string }>[]
   executeCommand(id: string): boolean
 }
 
 export interface EditorActions {
+  hasOpenDocument(): boolean
   captureText(): CapturedDocumentRevision
   save(): void
   copy(): void
@@ -67,7 +69,8 @@ export interface EditorActions {
   applyText(expectedVersion: number, text: string): boolean
   cancelOpenFileRequest(): void
   requestOpenFile(path: string): boolean
-  requestClose(): void
+  requestClose(): boolean
+  discardAndClose(): void
 }
 
 export interface CapturedDocumentRevision {

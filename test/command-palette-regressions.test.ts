@@ -35,7 +35,7 @@ test("Quick Open keeps its input and footer visible when the terminal becomes sh
   const setup = await createTestRenderer({ width: 80, height: 24, otherModifiersMode: true })
   const controller = new AbortController()
   const session = runEditorSession(
-    { filePath: join(dir, "00.txt"), workspaceRoot: dir, signal: controller.signal },
+    { kind: "folder", filePath: join(dir, "00.txt"), workspaceRoot: dir, signal: controller.signal },
     { createRenderer: async () => setup.renderer },
   )
 
@@ -67,7 +67,7 @@ test("a stale Quick Open result reports the error and keeps the current file act
   const setup = await createTestRenderer({ width: 80, height: 24, otherModifiersMode: true })
   const controller = new AbortController()
   const session = runEditorSession(
-    { filePath: activePath, workspaceRoot: dir, signal: controller.signal },
+    { kind: "folder", filePath: activePath, workspaceRoot: dir, signal: controller.signal },
     { createRenderer: async () => setup.renderer },
   )
 

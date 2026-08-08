@@ -1,6 +1,7 @@
+import { existsSync, statSync } from "node:fs"
 import { resolve } from "node:path"
 import manifest from "../package.json" with { type: "json" }
-import { runEditorSession, type EditorSessionResult } from "./editor-session"
+import { runEditorSession, type EditorSessionRequest, type EditorSessionResult } from "./editor-session"
 
 export type CliSignal = "SIGHUP" | "SIGINT" | "SIGTERM"
 
@@ -10,9 +11,7 @@ export type CliResult = Readonly<{
   stderr?: string
 }>
 
-export type EditFile = (
-  request: Readonly<{ filePath: string; workspaceRoot: string; signal: AbortSignal }>,
-) => Promise<EditorSessionResult>
+export type EditFile = (request: EditorSessionRequest) => Promise<EditorSessionResult>
 
 const SIGNAL_EXIT_CODES: Record<CliSignal, 129 | 130 | 143> = {
   SIGHUP: 129,
@@ -36,16 +35,17 @@ export async function runCli(
   }
 
   if (argv.length !== 1 || !argv[0]) {
-    return { exitCode: 2, stderr: "Usage: likho <file>\n" }
+    return { exitCode: 2, stderr: "Usage: likho <file-or-folder>\n" }
   }
 
   try {
-    const workspaceRoot = resolve(options.cwd ?? process.cwd())
-    const result = await (options.editFile ?? runEditorSession)({
-      filePath: resolve(workspaceRoot, argv[0]),
-      workspaceRoot,
-      signal: options.signal,
-    })
+    const cwd = resolve(options.cwd ?? process.cwd())
+    const target = resolve(cwd, argv[0])
+    const request: EditorSessionRequest =
+      existsSync(target) && statSync(target).isDirectory()
+        ? { kind: "folder", workspaceRoot: target, signal: options.signal }
+        : { kind: "file", filePath: target, signal: options.signal }
+    const result = await (options.editFile ?? runEditorSession)(request)
     if (result.kind === "closed") return { exitCode: 0 }
     const signal = abortedSignal(result.reason)
     return signal ? { exitCode: SIGNAL_EXIT_CODES[signal] } : { exitCode: 1, stderr: "Editor cancelled\n" }

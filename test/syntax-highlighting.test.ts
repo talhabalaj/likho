@@ -47,6 +47,7 @@ test("syntax disposal destroys the client without scheduling a buffer-removal ti
     signal: new AbortController().signal,
     document,
     actions: {
+      hasOpenDocument: () => true,
       captureText: () => ({ text: document.persistedText, version: document.snapshot.version }),
     },
     syntax: {
@@ -104,6 +105,7 @@ test("syntax captures once after a burst of document changes", async () => {
     signal: new AbortController().signal,
     document,
     actions: {
+      hasOpenDocument: () => true,
       captureText() {
         captures++
         return { text, version }
@@ -175,6 +177,7 @@ test("syntax disables once when a document crosses the highlighting limit", asyn
     signal: new AbortController().signal,
     document,
     actions: {
+      hasOpenDocument: () => true,
       captureText() {
         captures++
         return { text, version }
@@ -211,10 +214,12 @@ test("syntax disables once when a document crosses the highlighting limit", asyn
   expect(destroys).toBe(1)
 })
 
-test("syntax highlighting follows active-document filetype changes", async () => {
-  let path = "/tmp/example.txt"
-  let text = "plain"
+test("syntax waits for the first active document and then follows filetype changes", async () => {
+  let path = "/tmp/.likho-no-file"
+  let text = ""
   let version = 1
+  let hasOpenDocument = false
+  let captures = 0
   let listener: ((snapshot: EditorDocument["snapshot"]) => void) | undefined
   const creates: Array<{ filetype: string; text: string; version: number }> = []
   let destroys = 0
@@ -253,7 +258,13 @@ test("syntax highlighting follows active-document filetype changes", async () =>
   const context = {
     signal: new AbortController().signal,
     document,
-    actions: { captureText: () => ({ text, version }) },
+    actions: {
+      hasOpenDocument: () => hasOpenDocument,
+      captureText: () => {
+        captures++
+        return { text, version }
+      },
+    },
     syntax: {
       bufferId: 10,
       getVisibleLineRange: () => ({ start: 0, end: 20 }),
@@ -267,6 +278,8 @@ test("syntax highlighting follows active-document filetype changes", async () =>
   } as unknown as Readonly<EditorPluginContext & { subscriptions: DisposableStore }>
 
   await plugin.activate(context)
+  expect(captures).toBe(0)
+  hasOpenDocument = true
   path = "/tmp/example.ts"
   text = "const value = 1"
   version = 2
@@ -282,6 +295,7 @@ test("syntax highlighting follows active-document filetype changes", async () =>
     { filetype: "typescript", text: "const value = 1", version: 2 },
     { filetype: "markdown", text: "# Heading", version: 3 },
   ])
+  expect(captures).toBe(2)
   expect(destroys).toBe(1)
 
   await subscriptions.dispose()
@@ -316,7 +330,7 @@ test("syntax retains the full parse while painting only the viewport and oversca
   const context = {
     signal: new AbortController().signal,
     document,
-    actions: { captureText: () => ({ text, version: 1 }) },
+    actions: { hasOpenDocument: () => true, captureText: () => ({ text, version: 1 }) },
     syntax: {
       bufferId: 11,
       getVisibleLineRange: () => viewport,

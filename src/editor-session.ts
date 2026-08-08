@@ -12,10 +12,12 @@ import {
 import { registerDefaultKeys, registerMetadataFields, registerModBindings } from "@opentui/keymap/addons"
 import { registerManagedTextareaLayer } from "@opentui/keymap/addons/opentui"
 import { createOpenTuiKeymap } from "@opentui/keymap/opentui"
-import { basename, dirname } from "node:path"
+import { randomUUID } from "node:crypto"
+import { basename, dirname, join } from "node:path"
 import { openDocument } from "./document"
 import { createBuiltins } from "./plugins/builtins"
-import { createChrome, type ChromePlugin } from "./plugins/chrome"
+import { createChrome, STATUS_MESSAGE_DURATION_MS, type ChromePlugin } from "./plugins/chrome"
+import type { EditorSlotName } from "./plugins/editor-slots"
 import {
   DisposableStore,
   PluginHost,
@@ -62,10 +64,15 @@ const DARK_PLUS_STYLES = {
 
 interface EditorSessionDependencies {
   createRenderer(): Promise<CliRenderer>
+  now?(): number
   plugins?: readonly BuiltinPlugin<EditorPluginContext>[]
 }
 
 export type EditorSessionResult = { kind: "closed" } | { kind: "aborted"; reason: unknown }
+export type EditorSessionRequest = Readonly<
+  | { kind: "file"; filePath: string; workspaceRoot?: never; signal: AbortSignal }
+  | { kind: "folder"; workspaceRoot: string; filePath?: string; signal: AbortSignal }
+>
 
 function resolveStyleId(style: SyntaxStyle, group: string): number | null {
   let name = group
@@ -79,12 +86,14 @@ function resolveStyleId(style: SyntaxStyle, group: string): number | null {
 }
 
 export async function runEditorSession(
-  request: Readonly<{ filePath: string; workspaceRoot?: string; signal: AbortSignal }>,
+  request: EditorSessionRequest,
   dependencies: EditorSessionDependencies = {
     createRenderer: () => createCliRenderer({ exitOnCtrlC: false }),
   },
 ): Promise<EditorSessionResult> {
-  const document = openDocument(request.filePath)
+  const workspaceRoot = request.kind === "folder" ? request.workspaceRoot : dirname(request.filePath)
+  let hasOpenDocument = request.filePath !== undefined
+  const document = openDocument(request.filePath ?? join(workspaceRoot, `.likho-no-file-${randomUUID()}`))
   if (request.signal.aborted) return { kind: "aborted", reason: request.signal.reason }
 
   const renderer = await dependencies.createRenderer()
@@ -96,8 +105,7 @@ export async function runEditorSession(
   try {
     const syntaxStyle = SyntaxStyle.fromStyles(DARK_PLUS_STYLES)
     resources.add(() => syntaxStyle.destroy())
-    let quitArmedVersion: number | null = null
-    let openArmed: Readonly<{ path: string; version: number }> | undefined
+    let openArmed: Readonly<{ path: string; version: number; expiresAt: number }> | undefined
     let finish!: (result: EditorSessionResult) => void
     const finished = new Promise<EditorSessionResult>((resolve) => {
       finish = (result) => {
@@ -131,7 +139,6 @@ export async function runEditorSession(
       changePending = false
       if (closing) return
       document.markChanged()
-      quitArmedVersion = null
       openArmed = undefined
       if (ready) chrome.clearMessage()
     }
@@ -143,6 +150,7 @@ export async function runEditorSession(
 
     const editor = new TextareaRenderable(renderer, {
       initialValue: document.persistedText,
+      placeholder: hasOpenDocument ? undefined : "Open a file from Explorer",
       width: "100%",
       height: "100%",
       wrapMode: "none",
@@ -162,18 +170,36 @@ export async function runEditorSession(
         queueDocumentChange()
       },
     })
-    chrome = createChrome({ editor, title, status })
+    editor.focusable = hasOpenDocument
+    chrome = createChrome({
+      editor,
+      title,
+      status,
+      documentTitle: (path) => (hasOpenDocument ? basename(path) : "No file open"),
+    })
 
-    const uiSlots = createCoreSlotRegistry<"editor-frame", object, object>(renderer, {})
+    const uiSlots = createCoreSlotRegistry<EditorSlotName, object, object>(renderer, {})
+    const primarySidebar = new SlotRenderable(renderer, {
+      registry: uiSlots,
+      name: "primary-sidebar",
+      mode: "single_winner",
+      width: 0,
+      height: "100%",
+      flexShrink: 0,
+      visible: false,
+    })
+    primarySidebar.focusable = true
     const editorFrame = new SlotRenderable(renderer, {
       registry: uiSlots,
       name: "editor-frame",
       mode: "single_winner",
       fallback: editor,
-      width: "100%",
+      flexGrow: 1,
+      minWidth: 0,
       height: "100%",
     })
-    const editorPanel = new BoxRenderable(renderer, { flexGrow: 1 })
+    const editorPanel = new BoxRenderable(renderer, { width: "100%", flexGrow: 1, flexDirection: "row" })
+    editorPanel.add(primarySidebar)
     editorPanel.add(editorFrame)
     root.add(titleBar)
     root.add(editorPanel)
@@ -191,6 +217,7 @@ export async function runEditorSession(
     }
     const captureText = () => {
       if (closing || lifetime.signal.aborted) throw new Error("Editor is closing")
+      if (!hasOpenDocument) throw new Error("No file open")
       flushDocumentChange()
       const text = editor.plainText
       document.validateText(text)
@@ -198,18 +225,24 @@ export async function runEditorSession(
     }
     const save = () => {
       if (closing) return
+      if (!hasOpenDocument) {
+        report("No file open")
+        return
+      }
       try {
         const captured = captureText()
         document.save(captured.text)
-        quitArmedVersion = null
         openArmed = undefined
-        report(`Saved ${basename(document.snapshot.path)}`)
       } catch (error) {
         report(error instanceof Error ? error.message : String(error))
       }
     }
     const copy = (cut: boolean) => {
       if (closing) return
+      if (!hasOpenDocument) {
+        report("No file open")
+        return
+      }
       try {
         const captured = captureText()
         const selected = editor.getSelectedText()
@@ -218,38 +251,39 @@ export async function runEditorSession(
           report("Clipboard unavailable; nothing was cut")
         } else if (cut) {
           selected ? editor.deleteSelection() : editor.deleteLine()
-          report("Cut to clipboard")
-        } else {
-          report("Copied to clipboard")
         }
       } catch (error) {
         report(error instanceof Error ? error.message : String(error))
       }
     }
     const requestClose = () => {
-      if (closing) return
+      if (closing) return true
       flushDocumentChange()
-      const snapshot = document.snapshot
-      if (snapshot.dirty && quitArmedVersion !== snapshot.version) {
-        quitArmedVersion = snapshot.version
-        report("Unsaved changes — repeat close to discard")
-        return
-      }
+      if (document.snapshot.dirty) return false
       finish({ kind: "closed" })
+      return true
     }
+    const discardAndClose = () => finish({ kind: "closed" })
     const requestOpenFile = (path: string) => {
       if (closing) return false
       flushDocumentChange()
       const snapshot = document.snapshot
       if (path === snapshot.path) return true
-      if (snapshot.dirty && (openArmed?.path !== path || openArmed.version !== snapshot.version)) {
-        openArmed = { path, version: snapshot.version }
+      const now = dependencies.now?.() ?? Date.now()
+      const confirmationIsCurrent =
+        openArmed?.path === path && openArmed.version === snapshot.version && now < openArmed.expiresAt
+      if (snapshot.dirty && !confirmationIsCurrent) {
+        openArmed = { path, version: snapshot.version, expiresAt: now + STATUS_MESSAGE_DURATION_MS }
         report("Unsaved changes — press Enter again to discard")
         return false
       }
+      const previouslyOpen = hasOpenDocument
       try {
         replacingDocument = true
+        hasOpenDocument = true
         document.open(path, (text) => {
+          editor.focusable = true
+          editor.placeholder = null
           suppressDocumentChange = true
           editor.setText(text)
           editor.setCursor(0, 0)
@@ -257,11 +291,12 @@ export async function runEditorSession(
             suppressDocumentChange = false
           })
         })
-        quitArmedVersion = null
         openArmed = undefined
-        report(`Opened ${basename(path)}`)
         return true
       } catch (error) {
+        hasOpenDocument = previouslyOpen
+        editor.focusable = hasOpenDocument
+        if (!hasOpenDocument) editor.placeholder = "Open a file from Explorer"
         report(error instanceof Error ? error.message : String(error))
         return false
       } finally {
@@ -280,15 +315,17 @@ export async function runEditorSession(
         document,
         commands,
         actions: {
+          hasOpenDocument: () => hasOpenDocument,
           captureText,
           save,
           copy: () => copy(false),
           cut: () => copy(true),
           insertTab: () => {
-            if (!closing) editor.insertText("\t")
+            if (!closing && hasOpenDocument) editor.insertText("\t")
           },
           applyText: (expectedVersion, text) => {
-            if (closing || lifetime.signal.aborted || document.snapshot.version !== expectedVersion) return false
+            if (!hasOpenDocument || closing || lifetime.signal.aborted || document.snapshot.version !== expectedVersion)
+              return false
             document.validateText(text)
             editor.replaceText(text)
             queueDocumentChange()
@@ -300,6 +337,7 @@ export async function runEditorSession(
           },
           requestOpenFile,
           requestClose,
+          discardAndClose,
         },
         syntax: {
           bufferId: editor.editBuffer.id,
@@ -339,19 +377,25 @@ export async function runEditorSession(
       dependencies.plugins ??
       createBuiltins({
         chrome: chrome.plugin,
+        closeConfirmation: { renderer, root, editor },
         lineNumbers: { renderer, editor, slots: uiSlots },
-        quickInput: {
-          renderer,
-          root,
-          editor,
-          workspaceRoot: request.workspaceRoot ?? dirname(request.filePath),
-        },
+        fileExplorer: request.kind === "folder"
+          ? {
+              renderer,
+              editor,
+              slots: uiSlots,
+              sidebarSlot: primarySidebar,
+              workspaceRoot,
+              focusOnActivate: request.filePath === undefined,
+            }
+          : undefined,
+        quickInput: { renderer, root, editor, workspaceRoot },
       })
     await pluginHost.activate(plugins, lifetime.signal)
     if (closing || lifetime.signal.aborted) return await finished
     renderer.root.add(root)
     ready = true
-    editor.focus()
+    if (hasOpenDocument) editor.focus()
     if (request.signal.aborted) onAbort()
     return await finished
   } finally {

@@ -10,6 +10,7 @@ a promise of dates, and priorities may move when real usage exposes a better ord
 - [x] Edit, select, undo, redo, copy, cut, and save
 - [x] VS Code-style cross-platform keybindings
 - [x] Line numbers and mouse-wheel scrolling
+- [x] Lazy folder Explorer with keyboard and mouse navigation
 - [x] Tree-sitter syntax highlighting with Unicode-aware terminal columns
 - [x] Dirty-state and cursor-position UI
 - [x] External-change protection and unsaved-close confirmation
@@ -54,7 +55,7 @@ This milestone should remove the reasons a user has to leave the editor for rout
 - [ ] Multiple open buffers with a quick switcher
 - [ ] Tabs and split views with explicit focus commands
 - [x] Git-aware fuzzy file picker
-- [ ] Lightweight project explorer
+- [x] Lightweight project explorer for folder launches
 - [ ] Recent files and optional session restoration
 - [ ] File watching with a deliberate reload/diff/keep decision on conflicts
 - [ ] Workspace search that streams results and remains cancellable

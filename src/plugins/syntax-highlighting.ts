@@ -62,12 +62,14 @@ export function createSyntaxHighlighting(
     id: "builtin.syntax-highlighting",
     activate(context) {
       if (context.signal.aborted) return
-      let submitted: CapturedDocumentRevision
-      try {
-        submitted = context.actions.captureText()
-      } catch (error) {
-        context.report(`Syntax highlighting disabled: ${error instanceof Error ? error.message : String(error)}`)
-        return
+      let submitted: CapturedDocumentRevision | undefined
+      if (context.actions.hasOpenDocument()) {
+        try {
+          submitted = context.actions.captureText()
+        } catch (error) {
+          context.report(`Syntax highlighting disabled: ${error instanceof Error ? error.message : String(error)}`)
+          return
+        }
       }
       let disposed = false
       let disabled = false
@@ -76,7 +78,7 @@ export function createSyntaxHighlighting(
       let initialization: Promise<boolean> | undefined
       let clientPath: string | undefined
       let activePath = context.document.snapshot.path
-      let scheduledVersion = submitted.version
+      let scheduledVersion = submitted?.version ?? context.document.snapshot.version
       let generation = 0
       let transition = Promise.resolve()
       let highlightsByLine: ReadonlyMap<number, readonly StyledDisplayHighlight[]> | undefined
@@ -101,6 +103,7 @@ export function createSyntaxHighlighting(
       const onHighlights = (bufferId: number, version: number, responses: HighlightResponse[]) => {
         const current = context.document.snapshot
         if (
+          !submitted ||
           disposed ||
           disabled ||
           bufferId !== context.syntax.bufferId ||
@@ -204,7 +207,7 @@ export function createSyntaxHighlighting(
         clearHighlights()
         if (message) context.report(message)
       }
-      startClient(submitted, activePath, false)
+      if (submitted) startClient(submitted, activePath, false)
       context.subscriptions.add(async () => {
         disposed = true
         generation++

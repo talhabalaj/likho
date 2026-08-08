@@ -16,7 +16,7 @@ test("the executable reports invalid usage without entering the terminal UI", ()
   const result = Bun.spawnSync(["bun", "run", "src/index.ts"], { cwd: projectRoot })
 
   expect(result.exitCode).toBe(2)
-  expect(result.stderr.toString()).toBe("Usage: likho <file>\n")
+  expect(result.stderr.toString()).toBe("Usage: likho <file-or-folder>\n")
 })
 
 test("maps Tree-sitter source columns to terminal display columns", () => {

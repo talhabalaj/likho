@@ -65,6 +65,18 @@ export function createOpenTuiCommands(
       })
       return { dispose: unregister }
     },
+    captureKeyInputWhile(active, allowedKeys) {
+      const matchers = allowedKeys.map((key) => keymap.createKeyMatcher(key))
+      const unregister = keymap.intercept(
+        "key",
+        ({ event, consume }) => {
+          if (!active() || matchers.some((matches) => matches(event))) return
+          consume({ preventDefault: true, stopPropagation: true })
+        },
+        { priority: 10_000 },
+      )
+      return { dispose: unregister }
+    },
     listCommands() {
       const contributed = [...commands.values()].filter(({ palette }) => palette)
       const bindings = keymap.getCommandBindings({
