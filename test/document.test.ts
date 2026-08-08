@@ -161,6 +161,20 @@ test("saving refuses buffers beyond the byte or line limits", () => {
   expect(document.snapshot.dirty).toBe(true)
 })
 
+test("the maximum supported UTF-8 buffer round-trips without truncation", () => {
+  const dir = mkdtempSync(join(tmpdir(), "editor-document-test-"))
+  dirs.push(dir)
+  const path = join(dir, "maximum.txt")
+  const text = "🙂".repeat(MAX_FILE_BYTES / 4)
+  const document = openDocument(path)
+  document.markChanged()
+
+  document.save(text)
+
+  expect(Buffer.byteLength(readFileSync(path))).toBe(MAX_FILE_BYTES)
+  expect(openDocument(path).persistedText).toBe(text)
+})
+
 test("opening another file replaces the active document and preserves subscriptions", () => {
   const dir = mkdtempSync(join(tmpdir(), "editor-document-test-"))
   dirs.push(dir)

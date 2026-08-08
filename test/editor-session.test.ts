@@ -422,6 +422,55 @@ test("the Tree-sitter built-in applies Dark+ syntax colors", async () => {
   }
 })
 
+test("syntax highlighting follows the editor viewport", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "editor-session-test-"))
+  dirs.push(dir)
+  const path = join(dir, "viewport.ts")
+  writeFileSync(path, Array.from({ length: 80 }, (_, line) => `const value${line + 1} = ${line + 1}`).join("\n"))
+  const setup = await createTestRenderer({ width: 80, height: 10, otherModifiersMode: true })
+  const controller = new AbortController()
+  const session = runEditorSession(
+    { filePath: path, signal: controller.signal },
+    { createRenderer: async () => setup.renderer },
+  )
+
+  try {
+    let topHighlighted = false
+    for (let attempt = 0; attempt < 40 && !topHighlighted; attempt++) {
+      await Bun.sleep(25)
+      await setup.flush()
+      topHighlighted = setup
+        .captureSpans()
+        .lines.flatMap((line) => line.spans)
+        .some((span) => span.text === "const" && span.fg.toInts().join(",") === "86,156,214,255")
+    }
+    expect(topHighlighted).toBe(true)
+
+    if (process.platform === "darwin") {
+      setup.mockInput.pressArrow("down", { super: true })
+    } else {
+      setup.mockInput.pressKey("end", { ctrl: true })
+    }
+
+    let bottomHighlighted = false
+    for (let attempt = 0; attempt < 40 && !bottomHighlighted; attempt++) {
+      await Bun.sleep(25)
+      await setup.flush()
+      const frame = setup.captureCharFrame()
+      bottomHighlighted =
+        frame.includes("80 const value80") &&
+        setup
+          .captureSpans()
+          .lines.flatMap((line) => line.spans)
+          .some((span) => span.text === "const" && span.fg.toInts().join(",") === "86,156,214,255")
+    }
+    expect(bottomHighlighted).toBe(true)
+  } finally {
+    controller.abort({ kind: "signal", signal: "SIGTERM" })
+    await session
+  }
+})
+
 test("Shift+Option/Alt+F formats the current document through a built-in", async () => {
   const dir = mkdtempSync(join(tmpdir(), "editor-session-test-"))
   dirs.push(dir)

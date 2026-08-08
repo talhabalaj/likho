@@ -188,7 +188,7 @@ export function createSyntaxHighlighting(
               context.report(`Syntax highlighting disabled: ${error instanceof Error ? error.message : String(error)}`)
               return
             }
-            startClient(captured, path)
+            startClient(captured, path, false)
           })
           .catch((error) => {
             if (!disposed && !context.signal.aborted) {

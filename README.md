@@ -9,13 +9,8 @@ the feature that must never be clever.
 
 ## Try it
 
-Bun is required.
-
-```sh
-bunx likho@latest README.md
-```
-
-You can also launch it through npm when Bun is installed:
+Run Likho through npm; the first launch downloads and caches the standalone binary for your
+platform:
 
 ```sh
 npx likho@latest README.md
@@ -24,9 +19,12 @@ npx likho@latest README.md
 To install the command globally:
 
 ```sh
-bun add --global likho
+npm install --global likho
 likho README.md
 ```
+
+The npm launcher requires Node.js 18 or newer, but the editor binary includes its own Bun runtime.
+Standalone release downloads support macOS, glibc and musl Linux, and Windows on ARM64 and x64.
 
 Passing a path that does not exist opens an empty buffer and creates the file when you save it.
 
@@ -72,10 +70,10 @@ Opening another file uses the same two-step confirmation and keeps the picker op
 
 ## Current limits
 
-- Bun is the supported runtime; the npm package does not run under Node.js alone.
+- The npm launcher downloads roughly 27–48 MB on first use and caches that version's binary.
 - One file is active at a time. There are no tabs, splits, explorer, project model, or settings UI yet.
 - Files larger than 900,000 bytes or 100,000 lines are rejected while OpenTUI's buffer export is limited.
-- Syntax highlighting is disabled above 200,000 bytes until edits can be sent incrementally.
+- Syntax highlighting parses the whole document but paints only the viewport plus 10 overscan lines; it is disabled above 200,000 bytes until edits can be sent incrementally.
 - Formatting is explicit and available for supported files, but may pause the UI on larger documents.
 - Clipboard support depends on the terminal accepting OSC 52.
 - The plugin host currently organizes trusted built-ins. It does not load third-party code.
@@ -97,11 +95,11 @@ bun run typecheck
 bun run build
 ```
 
-The normal build writes the Bun entry point to `dist/index.js`. To make a standalone executable for
-your current platform:
+The normal build writes the Bun entry point to `dist/index.js`. To make the minified standalone
+executable used by releases for your current platform:
 
 ```sh
-bun build --compile src/index.ts --outfile dist/likho
+bun build --compile --minify src/index.ts --outfile dist/likho
 ./dist/likho README.md
 ```
 
